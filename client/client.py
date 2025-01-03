@@ -1,5 +1,6 @@
 import socket
 import os 
+import time
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import importlib.resources 
@@ -14,8 +15,8 @@ class Client:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.conn = self.socket.connect(("localhost", 6789))
         self.peers = dict()
-        print(self.server_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
-        print(self.private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()))
+        # print(self.server_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
+        # print(self.private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()))
 
         
     def register(self):
@@ -26,18 +27,39 @@ class Client:
 
         otc = self.socket.recv(6)
         print(f"Got OTC over \"secured\" channel {otc}")
-
-        verify_otc_req = b'verify_otc ' + otc + b'\n\n'
+        enc_otc = self.server_public_key.encrypt(otc, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                                         algorithm=hashes.SHA256(),
+                                                         label=None))
+        print("Length of otc enc")
+        print(len(enc_otc))
+        print("Encrypted")
+        print(enc_otc)
+        verify_otc_req = b'verify_otc\n\n'
         signature = self.private_key.sign(otc, padding.PSS(
             mgf=padding.MGF1(hashes.SHA256()),
             salt_length=padding.PSS.MAX_LENGTH),
             hashes.SHA256()
             )
-        verify_otc_req += signature
+        verify_otc_req += enc_otc + signature
         self.socket.send(verify_otc_req)
     
+    def connect(self):
+        id_bytes = bytes(self.id + '-hello-' + str(time.time()), "utf-8")
+        connect_req = b'connect ' + id_bytes + b'\n\n'
+        signature = self.private_key.sign(id_bytes, padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+            )
+        connect_req += signature
+        self.socket.send(connect_req)
+    
     def send_message(self, peer_id, message):
-        pass
+        message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + bytes(message, "utf-8")
+        self.socket.send(message_req)
+
+    def close(self):
+        self.socket.close()
 
     def load_private_key():
         if importlib.resources.is_resource(resources, "private.pem"):
@@ -59,7 +81,3 @@ class Client:
     def get_public_key_bytes(self):
         return self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
                 
-
-client = Client("111111111")
-client.register()
-
