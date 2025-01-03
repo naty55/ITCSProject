@@ -12,7 +12,7 @@ class Server:
         self.socket = None
         self.pri_key = Server.read_private_key()
         self.pub_key = self.pri_key.public_key()
-        self.clients = dict()
+        self.registered_clients = dict()
     
     def start(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -24,58 +24,89 @@ class Server:
                 Thread(target=self.handle_new_connection, args=(conn,)).start()
     
     def handle_new_connection(self, conn):
+        client = None
         data = conn.recv(4096)
+        print(data)
         header, payload = data.split(b'\n\n', 1)
         req_type, client_id = header.split(b' ')
+        client_id = client_id.decode()
         if req_type == b'register':
-            self.handle_register_request(conn)
+            if not self.handle_register_request(conn, client_id, payload):
+                conn.close()
+                return
+            client = self.registered_clients[client_id]
         elif req_type == b'connect':
-            if client_id not in self.clients or not self.clients[client_id]['registerd']:
-                raise
+            signed_text_message = client_id
+            client_id = client_id.split('-', 1)[0]
+            if client_id not in self.registered_clients:
+                print(f"Client id {client_id} is not registered user - connection denied")
+                conn.close()
+                return
 
+            client = self.registered_clients[client_id]
+            if client['has_session']:
+                print(f"Client id {client_id} already has another session - connection denied")
+                conn.close()
+                return
+
+            if not utils.verify_signature(client['public_key'], bytes(signed_text_message, "utf-8"), payload):
+                print(f"Client id {client_id} couldn't be verified - connection denied")
+                conn.close()
+                return
+
+            print(f"{client_id} has been successfully connected")
+            client['has_session'] = True
+        
         # Connection stays open for next requests
         while True:
             data = conn.recv(4096)
             if not data:
-                self.clients[client_id]['has_session'] = False
+                client['has_session'] = False
                 break
             self.handle_message_request(data)
         
     def handle_register_request(self, conn, client_id, payload):
-        client_id = client_id.decode()
         if not utils.validate_client_id(client_id):
             return False
         print(f"Client {client_id} is trying to register")
+        
+        if client_id in self.registered_clients:
+            return False
+        
         new_client = dict()
-        self.clients[client_id] = new_client
         new_client['public_key'] = serialization.load_pem_public_key(payload)
-        self.send_by_secure_channel(client_id, conn)
+        self.send_by_secure_channel(client_id, conn, new_client)
         data = conn.recv(4096)
         
         header, payload = data.split(b'\n\n', 1)
-        req_type, otc = header.split(b' ')
+        req_type = header
+        otc_enc, signature = payload[:256], payload[256:]
+        otc = self.pri_key.decrypt(otc_enc, padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None)
+        )
+        
         if req_type != b'verify_otc':
-            raise
+            return False
         print(f"Recieved otc from client, client id {client_id}, otc={otc}")
-        registration_failed = False
-        if otc.decode() != new_client['otc']:
-            registration_failed = True
-        else:
-            if not utils.verify_signature(new_client['public_key'], otc, payload):
-                registration_failed = True
-            new_client['registerd'] = True
-            new_client['has_session'] = True
-        if registration_failed:
-            del self.clients[client_id]
 
-        return not registration_failed
+        if otc.decode() != new_client['otc']:
+            return False
+        if not utils.verify_signature(new_client['public_key'], otc, signature):
+            return False
+        
+        print(f"Successfully registered {client_id}")
+        new_client['has_session'] = True
+        self.registered_clients[client_id] = new_client
+        return True
 
     def handle_message_request(self, request_bytes):
         print("got message", request_bytes)
 
-    def send_by_secure_channel(self, client_id, conn):
+    def send_by_secure_channel(self, client_id, conn, client):
         otc = utils.generate_otc()
-        self.clients[client_id]['otc'] = otc
+        client['otc'] = otc
         conn.send(bytes(otc,"utf-8"))
 
     def read_private_key():
