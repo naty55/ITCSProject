@@ -26,7 +26,6 @@ class Server:
     def handle_new_connection(self, conn):
         client = None
         data = conn.recv(4096)
-        print(data)
         header, payload = data.split(b'\n\n', 1)
         req_type, client_id = header.split(b' ')
         client_id = client_id.decode()
@@ -39,7 +38,7 @@ class Server:
             signed_text_message = client_id
             client_id = client_id.split('-', 1)[0]
             if client_id not in self.registered_clients:
-                print(f"Client id {client_id} is not registered user - connection denied")
+                print(f"Client id {client_id} is not a registered user - connection denied")
                 conn.close()
                 return
 
@@ -59,11 +58,15 @@ class Server:
         
         # Connection stays open for next requests
         while True:
-            data = conn.recv(4096)
-            if not data:
+            try:
+                data = conn.recv(4096)
+                if not data:
+                    client['has_session'] = False
+                    break
+                self.handle_message_request(data)
+            except ConnectionResetError:
                 client['has_session'] = False
                 break
-            self.handle_message_request(data)
         
     def handle_register_request(self, conn, client_id, payload):
         if not utils.validate_client_id(client_id):
@@ -98,11 +101,34 @@ class Server:
         
         print(f"Successfully registered {client_id}")
         new_client['has_session'] = True
+        new_client['incoming_messages'] = []
         self.registered_clients[client_id] = new_client
         return True
+    
+    def handle_get_public_key(self, request_bytes):
+        header, signature = request_bytes.split(b'\n\n', 1)
+        req_type, peer_id = header.split(b' ')
+        peer_id = peer_id.decode()
+
+        if req_type != b'get_public_key':
+            return
+
+        if peer_id not in self.registered_clients:
+            print(f"Peer id {peer_id} is not a registered user - request denied")
+            return
+
+        peer = self.registered_clients[peer_id]
+        print(peer)
+        public_key_bytes = peer['public_key'].public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        self.conn.send(public_key_bytes)
 
     def handle_message_request(self, request_bytes):
-        print("got message", request_bytes)
+        header, payload = request_bytes.split(b'\n\n')
+        print("Header:", header)
+        print("Payload:", payload)
 
     def send_by_secure_channel(self, client_id, conn, client):
         otc = utils.generate_otc()
