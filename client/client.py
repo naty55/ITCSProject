@@ -1,6 +1,9 @@
 import socket
 import os 
 import time
+import json
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding as sym_padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import importlib.resources 
@@ -13,12 +16,37 @@ class Client:
         self.public_key = self.private_key.public_key()
         self.server_public_key = Client.load_server_public_key()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.conn = self.socket.connect(("localhost", 6789))
-        self.peers = dict()
+        self.conn = None
+        self.is_registered = False
+        self.load_state()
         # print(self.server_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
         # print(self.private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()))
+    
+        self.init_connection()
+    
+    def init_connection(self):
+        self.conn = self.socket.connect(("localhost", 6789))
+        if self.is_registered:
+            print("Connecting...")
+            self.connect()
+        else:
+            print("Registering...")
+            self.register()
 
-        
+    def load_state(self):
+        state_json_file = json.load(importlib.resources.open_text(resources, "state.json"))
+        self.is_registered = state_json_file["is_registered"] or False
+        self.peers = state_json_file["peers"]
+
+    
+    def update_state(self):
+        state = {
+            "is_registered": self.is_registered,
+            "peers": self.peers
+        }
+        with open(os.path.dirname(__file__) + "/resources/state.json", "w") as state_file:
+            json.dump(state, state_file)
+    
     def register(self):
         public_key_bytes = self.get_public_key_bytes()
         print(f"len of public bytes {len(public_key_bytes)}")
@@ -30,9 +58,6 @@ class Client:
         enc_otc = self.server_public_key.encrypt(otc, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
                                                          algorithm=hashes.SHA256(),
                                                          label=None))
-        print("Length of otc enc")
-        print(len(enc_otc))
-        print("Encrypted")
         print(enc_otc)
         verify_otc_req = b'verify_otc\n\n'
         signature = self.private_key.sign(otc, padding.PSS(
@@ -42,6 +67,8 @@ class Client:
             )
         verify_otc_req += enc_otc + signature
         self.socket.send(verify_otc_req)
+        self.is_registered = True
+        self.update_state()
     
     def connect(self):
         id_bytes = bytes(self.id + '-hello-' + str(time.time()), "utf-8")
@@ -54,7 +81,12 @@ class Client:
         connect_req += signature
         self.socket.send(connect_req)
     
+
+    
     def send_message(self, peer_id, message):
+        if peer_id not in self.peers or not self.peers[peer_id]['shared_key']:
+            self.exchange_symmetric_key(peer_id)
+        # Client.aes_encrypt(bytes(message, 'utf-8'))
         message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + bytes(message, "utf-8")
         self.socket.send(message_req)
 
@@ -80,4 +112,48 @@ class Client:
     
     def get_public_key_bytes(self):
         return self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
-                
+    
+    def exchange_symmetric_key(self, peer_id):
+        new_peer = self.peers.get(peer_id, dict())
+        if new_peer.get('status', None) == 'ASK':
+            return
+
+        get_pk_req = b'get_public_key ' + bytes(peer_id, 'utf-8')
+        signature = self.private_key.sign(get_pk_req, padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+            )
+        get_pk_req += b'\n\n' + signature
+        self.socket.send(get_pk_req)
+        new_peer['status'] = 'ASK'
+
+        self.peers[peer_id] = new_peer
+        shared_key = os.urandom(32)
+        new_peer['shared_key'] = shared_key
+
+        
+    
+    def aes_encrypt(key, plaintext):
+        iv = os.urandom(16)
+        padder = sym_padding.PKCS7(128).padder()
+        padded_data = padder.update(plaintext) + padder.finalize()
+
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+        return iv + ciphertext
+    
+    def aes_decrypt(key, iv_ciphertext):
+        iv = iv_ciphertext[:16]
+        ciphertext = iv_ciphertext[16:]
+
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+        unpadder = sym_padding.PKCS7(128).unpadder()
+        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+        return plaintext
+
+
