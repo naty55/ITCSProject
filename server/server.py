@@ -15,6 +15,8 @@ class Server:
         self.registered_clients = dict()
     
     def start(self):
+        print("Starting server...")
+        print(f"Listening on {SERVER_HOST}:{SERVER_PORT}")
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind((SERVER_HOST, SERVER_PORT))
             s.listen(10)
@@ -35,27 +37,12 @@ class Server:
                 return
             client = self.registered_clients[client_id]
         elif req_type == b'connect':
-            signed_text_message = client_id
-            client_id = client_id.split('-', 1)[0]
-            if client_id not in self.registered_clients:
-                print(f"Client id {client_id} is not a registered user - connection denied")
-                conn.close()
-                return
-
-            client = self.registered_clients[client_id]
-            if client['has_session']:
-                print(f"Client id {client_id} already has another session - connection denied")
-                conn.close()
-                return
-
-            if not utils.verify_signature(client['public_key'], bytes(signed_text_message, "utf-8"), payload):
-                print(f"Client id {client_id} couldn't be verified - connection denied")
-                conn.close()
-                return
-
-            print(f"{client_id} has been successfully connected")
-            client['has_session'] = True
+            client = self.handle_connect_request(conn, client_id, payload)
+            
+        if client:
+            self.messages_loop(client, conn)
         
+    def messages_loop(self, client, conn):
         # Connection stays open for next requests
         while True:
             try:
@@ -63,11 +50,16 @@ class Server:
                 if not data:
                     client['has_session'] = False
                     break
-                self.handle_message_request(data)
+                if data.startswith(b'get_public_key'):
+                    self.handle_get_public_key(data, client, conn)
+                elif data.startswith(b'get_messages'):
+                    self.handle_get_all_messages(data, client, conn)
+                else:
+                    self.handle_message_request(data, client, conn)
             except ConnectionResetError:
                 client['has_session'] = False
                 break
-        
+
     def handle_register_request(self, conn, client_id, payload):
         if not utils.validate_client_id(client_id):
             return False
@@ -77,6 +69,7 @@ class Server:
             return False
         
         new_client = dict()
+        new_client['id'] = client_id
         new_client['public_key'] = serialization.load_pem_public_key(payload)
         self.send_by_secure_channel(client_id, conn, new_client)
         data = conn.recv(4096)
@@ -105,10 +98,38 @@ class Server:
         self.registered_clients[client_id] = new_client
         return True
     
-    def handle_get_public_key(self, request_bytes):
+    def handle_connect_request(self, conn, message, payload):
+        signed_text_message = message
+        client_id = message.split('-', 1)[0]
+        if client_id not in self.registered_clients:
+            print(f"Client id {client_id} is not a registered user - connection denied")
+            conn.close()
+            return 
+
+        client = self.registered_clients[client_id]
+        if client['has_session']:
+            print(f"Client id {client_id} already has another session - connection denied")
+            conn.close()
+            return 
+
+        if not utils.verify_signature(client['public_key'], bytes(signed_text_message, "utf-8"), payload):
+            print(f"Client id {client_id} couldn't be verified - connection denied")
+            conn.close()
+            return 
+
+        print(f"{client_id} has been successfully connected")
+        client['has_session'] = True
+        return client
+    
+    def handle_get_public_key(self, request_bytes, client, conn):
         header, signature = request_bytes.split(b'\n\n', 1)
+        if not utils.verify_signature(client['public_key'], header, signature):
+            print(f"Coludn't verify client request for public key, client_id={client['id']}")
+            return False
+        
         req_type, peer_id = header.split(b' ')
         peer_id = peer_id.decode()
+        print(f"peer {client['id']} is asking for {peer_id}'s public key")
 
         if req_type != b'get_public_key':
             return
@@ -118,17 +139,44 @@ class Server:
             return
 
         peer = self.registered_clients[peer_id]
-        print(peer)
         public_key_bytes = peer['public_key'].public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
-        self.conn.send(public_key_bytes)
+        signature = utils.sign(self.pri_key, public_key_bytes)
+        conn.send(public_key_bytes + signature)
 
-    def handle_message_request(self, request_bytes):
+    def handle_get_all_messages(self, request_bytes, client, conn):
+        print(f'{client["id"]} is asking all waiting messages')
+        messages_to_send = client.get("messages", [])
+        messages_bytes = b''
+
+        for message in messages_to_send:
+            messages_bytes = b'message ' + bytes(message['from'], 'utf-8') + b'\n\n' + message['message']
+        
+        messages_bytes += b'----DONE----'
+        conn.send(messages_bytes)
+        
+
+    def handle_message_request(self, request_bytes, client, conn):
         header, payload = request_bytes.split(b'\n\n')
-        print("Header:", header)
-        print("Payload:", payload)
+        req_type, peer_id = header.split(b' ')
+        if req_type != b'message':
+            return 
+        peer_id = peer_id.decode()
+        if peer_id not in self.registered_clients:
+            print("Peer id not found")
+            return 
+        peer = self.registered_clients[peer_id]
+        messages = peer.get("messages", [])
+        if len(messages) >= 10:
+            print(f"Inbox of peer {peer_id} is full")
+            return 
+        peer['messages'] = messages
+        messages.append({
+            "from": client['id'],
+            "message": payload
+        })
 
     def send_by_secure_channel(self, client_id, conn, client):
         otc = utils.generate_otc()
