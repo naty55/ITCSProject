@@ -2,6 +2,7 @@ import socket
 import os 
 import time
 import json
+import utils
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -18,10 +19,8 @@ class Client:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.conn = None
         self.is_registered = False
+        self.outgoing_messages = [] 
         self.load_state()
-        # print(self.server_public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
-        # print(self.private_key.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()))
-    
         self.init_connection()
     
     def init_connection(self):
@@ -35,7 +34,7 @@ class Client:
 
     def load_state(self):
         state_json_file = json.load(importlib.resources.open_text(resources, "state.json"))
-        self.is_registered = state_json_file["is_registered"] or False
+        self.is_registered = state_json_file["is_registered"]
         self.peers = state_json_file["peers"]
 
     
@@ -49,7 +48,6 @@ class Client:
     
     def register(self):
         public_key_bytes = self.get_public_key_bytes()
-        print(f"len of public bytes {len(public_key_bytes)}")
         reg_request = b'register ' + bytes(self.id, 'utf-8') + b'\n\n' + public_key_bytes
         self.socket.send(reg_request)
 
@@ -58,7 +56,6 @@ class Client:
         enc_otc = self.server_public_key.encrypt(otc, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
                                                          algorithm=hashes.SHA256(),
                                                          label=None))
-        print(enc_otc)
         verify_otc_req = b'verify_otc\n\n'
         signature = self.private_key.sign(otc, padding.PSS(
             mgf=padding.MGF1(hashes.SHA256()),
@@ -82,10 +79,12 @@ class Client:
         self.socket.send(connect_req)
     
 
-    
     def send_message(self, peer_id, message):
-        if peer_id not in self.peers or not self.peers[peer_id]['shared_key']:
+        if peer_id not in self.peers or not self.peers[peer_id].get('shared_key', None):
+            print("Unkonwn client - exchanging symmeteric key")
             self.exchange_symmetric_key(peer_id)
+            self.outgoing_messages.append({"to": peer_id, "message": message})
+            return
         # Client.aes_encrypt(bytes(message, 'utf-8'))
         message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + bytes(message, "utf-8")
         self.socket.send(message_req)
@@ -114,26 +113,71 @@ class Client:
         return self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
     
     def exchange_symmetric_key(self, peer_id):
-        new_peer = self.peers.get(peer_id, dict())
+        new_peer = self.peers.get(peer_id, dict({"message_counter": 0}))
         if new_peer.get('status', None) == 'ASK':
             return
+        peer_pk = new_peer.get('public_key', None)
+        if not peer_pk:
+            peer_pk = self.get_public_key_of_peer_from_server(peer_id)
+            new_peer['public_key'] = peer_pk
+            print(f"Got public key of {peer_id} from server")
+        
+        shared_key = os.urandom(32)
+        exe_message_req = b'message ' + bytes(peer_id, 'utf-8') + b'\n\nSYN' 
+        encrypted_syn_message = utils.encrypt(peer_pk, shared_key)
+        exe_message_req += encrypted_syn_message
+        self.socket.send(exe_message_req)
 
+        new_peer['status'] = 'ASK'
+        new_peer['shared_key'] = shared_key
+        self.peers[peer_id] = new_peer
+
+
+    def get_public_key_of_peer_from_server(self, peer_id):
+        """
+        Will make a blocking call to server asking for peer public key
+        """
         get_pk_req = b'get_public_key ' + bytes(peer_id, 'utf-8')
-        signature = self.private_key.sign(get_pk_req, padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH),
-            hashes.SHA256()
-            )
+        signature = utils.sign(self.private_key, get_pk_req)
         get_pk_req += b'\n\n' + signature
         self.socket.send(get_pk_req)
-        new_peer['status'] = 'ASK'
-
-        self.peers[peer_id] = new_peer
-        shared_key = os.urandom(32)
-        new_peer['shared_key'] = shared_key
-
-        
+        response_pk = self.socket.recv(4096)
+        peer_pk, signature = response_pk[:451], response_pk[451:]
+        if utils.verify_signature(self.server_public_key, peer_pk, signature):
+            return serialization.load_pem_public_key(peer_pk)
+        raise Exception("Couldn't verify response peer pk response")
     
+    def get_all_messages_from_server(self):
+        self.socket.send(b'get_messages\n\n')
+        # print(f"Recieving {no_of_messages} new messages..")
+        messages = b''
+        while not messages.endswith(b'----DONE----'):
+            data = self.socket.recv(4096)
+            if not data:
+                break
+            messages += data
+        print(messages)
+        self.handle_new_incoming_messages(messages[:-12])
+    
+    def handle_new_incoming_messages(self, messages):
+        messages = messages.split(b'message ')
+        print(messages)
+        for message in messages:
+            if len(message) < 2:
+                continue
+            peer_id, payload = message.split(b'\n\n')
+            peer_id = peer_id.decode()
+            msg_type, msg = payload[:3], payload[3:]
+            print(f"Got message from {peer_id}, msg_type={msg_type}, payload={msg}")
+            
+            if msg_type == b'SYN':
+                if peer_id not in self.peers:
+                    peer_pk = self.get_public_key_of_peer_from_server(peer_id)
+                    new_peer = {"public_key": peer_pk}
+
+                pass
+            
+
     def aes_encrypt(key, plaintext):
         iv = os.urandom(16)
         padder = sym_padding.PKCS7(128).padder()
