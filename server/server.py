@@ -152,7 +152,7 @@ class Server:
         messages_bytes = b''
 
         for message in messages_to_send:
-            messages_bytes = b'message ' + bytes(message['from'], 'utf-8') + b'\n\n' + message['message']
+            messages_bytes += b'message ' + bytes(message['from'], 'utf-8') + b'\n\n' + message['message']
         
         messages_bytes += b'----DONE----'
         conn.send(messages_bytes)
@@ -168,6 +168,7 @@ class Server:
             print("Peer id not found")
             return 
         peer = self.registered_clients[peer_id]
+        print(f"Message from {client['id']} to {peer_id}: {payload}")
         messages = peer.get("messages", [])
         if len(messages) >= 10:
             print(f"Inbox of peer {peer_id} is full")
