@@ -3,8 +3,7 @@ import os
 import time
 import json
 import utils
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding as sym_padding
+from peer import PeerStatus, Peer
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import importlib.resources 
@@ -13,7 +12,7 @@ import resources
 class Client:
     def __init__(self, client_id):
         self.id = client_id
-        self.private_key = Client.load_private_key()
+        self.private_key = self.load_private_key()
         self.public_key = self.private_key.public_key()
         self.server_public_key = Client.load_server_public_key()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -22,6 +21,8 @@ class Client:
         self.outgoing_messages = [] 
         self.load_state()
         self.init_connection()
+        self.peers = dict()
+        print(f"My public key: {self.get_public_key_bytes()}")
     
     def init_connection(self):
         self.conn = self.socket.connect(("localhost", 6789))
@@ -33,17 +34,17 @@ class Client:
             self.register()
 
     def load_state(self):
-        state_json_file = json.load(importlib.resources.open_text(resources, "state.json"))
+        state_json_file = json.load(importlib.resources.open_text(resources, f"{self.id}-state.json"))
         self.is_registered = state_json_file["is_registered"]
-        self.peers = state_json_file["peers"]
+        # self.peers = state_json_file["peers"]
 
     
     def update_state(self):
         state = {
             "is_registered": self.is_registered,
-            "peers": self.peers
+            # "peers": self.peers
         }
-        with open(os.path.dirname(__file__) + "/resources/state.json", "w") as state_file:
+        with open(f"{os.path.dirname(__file__)}/resources/{self.id}-state.json", "w") as state_file:
             json.dump(state, state_file)
     
     def register(self):
@@ -80,29 +81,29 @@ class Client:
     
 
     def send_message(self, peer_id, message):
-        if peer_id not in self.peers or not self.peers[peer_id].get('shared_key', None):
+        peer = self.get_peer(peer_id)
+        if peer.status == PeerStatus.UNKOWN:
             print("Unkonwn client - exchanging symmeteric key")
             self.exchange_symmetric_key(peer_id)
-            self.outgoing_messages.append({"to": peer_id, "message": message})
-            return
-        # Client.aes_encrypt(bytes(message, 'utf-8'))
-        message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + bytes(message, "utf-8")
+
+        message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + b'MSG' + peer.aes_encrypt(message)
         self.socket.send(message_req)
+        peer.accept_message(peer_id, self.id, message)
 
     def close(self):
         self.socket.close()
 
-    def load_private_key():
-        if importlib.resources.is_resource(resources, "private.pem"):
+    def load_private_key(self):
+        if importlib.resources.is_resource(resources,  f"{self.id}-private.pem"):
             return serialization.load_pem_private_key(
-                importlib.resources.read_binary(resources, "private.pem"), password=None)
-        
+                importlib.resources.read_binary(resources, f"{self.id}-private.pem"), password=None)
+        print("Generating new EC key pair, it will take some time so don't worry")
         private = rsa.generate_private_key(public_exponent=65537,key_size=2048)
         private_pem = private.private_bytes(encoding=serialization.Encoding.PEM,
                                             format=serialization.PrivateFormat.PKCS8,
                                             encryption_algorithm=serialization.NoEncryption()
                                             )
-        with open(os.path.dirname(__file__) + "/resources/private.pem", "wb") as pri_file:
+        with open(os.path.dirname(__file__) + f"/resources/{self.id}-private.pem", "wb") as pri_file:
             pri_file.write(private_pem)
         return private
     
@@ -113,24 +114,22 @@ class Client:
         return self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
     
     def exchange_symmetric_key(self, peer_id):
-        new_peer = self.peers.get(peer_id, dict({"message_counter": 0}))
-        if new_peer.get('status', None) == 'ASK':
+        new_peer = self.get_peer(peer_id)
+        if new_peer.status == PeerStatus.ASK:
             return
-        peer_pk = new_peer.get('public_key', None)
-        if not peer_pk:
+        if not new_peer.is_known():
             peer_pk = self.get_public_key_of_peer_from_server(peer_id)
-            new_peer['public_key'] = peer_pk
+            new_peer.set_public_key(peer_pk)
+            print(f"Peer public key {peer_pk.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)}")
             print(f"Got public key of {peer_id} from server")
         
-        shared_key = os.urandom(32)
+        shared_key_encrypted = new_peer.generate_shared_key()
+        print(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}")
         exe_message_req = b'message ' + bytes(peer_id, 'utf-8') + b'\n\nSYN' 
-        encrypted_syn_message = utils.encrypt(peer_pk, shared_key)
-        exe_message_req += encrypted_syn_message
+        exe_message_req += shared_key_encrypted
+        print(f"Encrypted shared secret '{shared_key_encrypted}'")
         self.socket.send(exe_message_req)
-
-        new_peer['status'] = 'ASK'
-        new_peer['shared_key'] = shared_key
-        self.peers[peer_id] = new_peer
+        new_peer.status = PeerStatus.ASK
 
 
     def get_public_key_of_peer_from_server(self, peer_id):
@@ -149,7 +148,6 @@ class Client:
     
     def get_all_messages_from_server(self):
         self.socket.send(b'get_messages\n\n')
-        # print(f"Recieving {no_of_messages} new messages..")
         messages = b''
         while not messages.endswith(b'----DONE----'):
             data = self.socket.recv(4096)
@@ -158,6 +156,10 @@ class Client:
             messages += data
         print(messages)
         self.handle_new_incoming_messages(messages[:-12])
+    
+    def show_messages(self, peer_id):
+        for message in self.peers[peer_id].messages:
+            print(message)
     
     def handle_new_incoming_messages(self, messages):
         messages = messages.split(b'message ')
@@ -169,35 +171,28 @@ class Client:
             peer_id = peer_id.decode()
             msg_type, msg = payload[:3], payload[3:]
             print(f"Got message from {peer_id}, msg_type={msg_type}, payload={msg}")
-            
+            peer = self.get_peer(peer_id)
             if msg_type == b'SYN':
-                if peer_id not in self.peers:
+                if not peer.is_known():
                     peer_pk = self.get_public_key_of_peer_from_server(peer_id)
-                    new_peer = {"public_key": peer_pk}
+                    peer.set_public_key(peer_pk)
 
-                pass
+                shared_secret = utils.decrypt(self.private_key, msg)
+                peer.set_shared_key(shared_secret)
+                print(f"Shared secret {shared_secret}")
+            if msg_type == b'MSG':
+                if not peer.shared_key:
+                    print(f"No shared key with peer {peer_id}, skipping message")
+                    continue
+                dec_message_bytes = peer.aes_decrypt(msg)
+                peer.accept_message(self.id, dec_message_bytes.decode(), _from=False)
+                print("Decrypted message: ", dec_message_bytes)
+    
+    def get_peer(self, peer_id):
+        peer = self.peers.get(peer_id, Peer(peer_id))
+        self.peers[peer_id] = peer
+        return peer
             
 
-    def aes_encrypt(key, plaintext):
-        iv = os.urandom(16)
-        padder = sym_padding.PKCS7(128).padder()
-        padded_data = padder.update(plaintext) + padder.finalize()
-
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
-        return iv + ciphertext
-    
-    def aes_decrypt(key, iv_ciphertext):
-        iv = iv_ciphertext[:16]
-        ciphertext = iv_ciphertext[16:]
-
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-        decryptor = cipher.decryptor()
-        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-
-        unpadder = sym_padding.PKCS7(128).unpadder()
-        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
-        return plaintext
 
 

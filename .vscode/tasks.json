@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Server",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/server/server.py"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Start Client 1",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/client/main.py",
+                "client1"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Start Client 2",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/client/main.py",
+                "client2"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        }
+    ]
+}

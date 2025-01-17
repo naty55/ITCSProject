@@ -1,6 +1,7 @@
 from enum import Enum
 import utils
 import os
+from message import Message
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
 
@@ -35,6 +36,12 @@ class Peer:
         self.shared_key = os.urandom(32)
         return utils.encrypt(self.public_key, self.shared_key)
     
+    def accept_message(self, peer_id, message, _from=True):
+        from_peer_id = peer_id if _from else self.id
+        to_peer_id = self.id if _from else peer_id
+        self.messages.append(Message(from_peer_id, to_peer_id, message))
+
+    
     def aes_encrypt(self, plaintext):
         print("Encrypting: ", plaintext)
         iv = os.urandom(16)
@@ -58,5 +65,6 @@ class Peer:
         unpadder = sym_padding.PKCS7(128).unpadder()
         plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
         return plaintext
+
     
 

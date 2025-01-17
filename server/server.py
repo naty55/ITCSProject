@@ -165,7 +165,7 @@ class Server:
             return 
         peer_id = peer_id.decode()
         if peer_id not in self.registered_clients:
-            print("Peer id not found")
+            print(f"Peer id '{peer_id}' not found")
             return 
         peer = self.registered_clients[peer_id]
         print(f"Message from {client['id']} to {peer_id}: {payload}")
