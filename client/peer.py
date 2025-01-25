@@ -2,10 +2,16 @@ from enum import Enum
 import utils
 import os
 from message import Message
+from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
 
+
+
 class PeerStatus(Enum):
+    """
+    Peer shared key status
+    """
     UNKOWN = 0  
     ASK = 1
     KNOWN = 2
@@ -25,7 +31,9 @@ class Peer:
         self.public_key = public_key
     
     def set_shared_key(self, shared_key):
-        self.shared_key = shared_key
+        if shared_key:
+            self.status = PeerStatus.KNOWN
+            self.shared_key = shared_key
     
     def next_message_no(self):
         return len(self.messages)
@@ -33,17 +41,18 @@ class Peer:
     def generate_shared_key(self):
         if not self.is_known():
             raise Exception("Can't generate shared key without public key")
-        self.shared_key = os.urandom(32)
+        self.set_shared_key(os.urandom(32))
         return utils.encrypt(self.public_key, self.shared_key)
     
     def accept_message(self, peer_id, message, _from=True):
         from_peer_id = peer_id if _from else self.id
         to_peer_id = self.id if _from else peer_id
-        self.messages.append(Message(from_peer_id, to_peer_id, message))
+        timestamp = datetime.now().isoformat()
+        self.messages.append(Message(from_peer_id, to_peer_id, message, str(self.next_message_no), timestamp))
+        self.next_message_no += 1
 
     
     def aes_encrypt(self, plaintext):
-        print("Encrypting: ", plaintext)
         iv = os.urandom(16)
         padder = sym_padding.PKCS7(128).padder()
         padded_data = padder.update(bytes(plaintext, 'utf-8')) + padder.finalize()
@@ -54,7 +63,6 @@ class Peer:
         return iv + ciphertext
     
     def aes_decrypt(self, iv_ciphertext):
-        print("Decrypting: ", iv_ciphertext)
         iv = iv_ciphertext[:16]
         ciphertext = iv_ciphertext[16:]
 

@@ -3,11 +3,15 @@ import os
 import time
 import json
 import utils
+import sys
 from peer import PeerStatus, Peer
+from logger import logger
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import importlib.resources 
 import resources
+from select import select
+from threading import Thread, Lock
 
 class Client:
     def __init__(self, client_id):
@@ -15,25 +19,36 @@ class Client:
         self.private_key = self.load_private_key()
         self.public_key = self.private_key.public_key()
         self.server_public_key = Client.load_server_public_key()
+        self.peers = dict()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.conn_is_used = Lock()
         self.conn = None
         self.is_registered = False
-        self.outgoing_messages = [] 
+        self.outgoing_messages = []
         self.load_state()
         self.init_connection()
-        self.peers = dict()
-        print(f"My public key: {self.get_public_key_bytes()}")
+        self.sync()
+        self.recv_messages()
+        logger.debug(f"self public key: {self.get_public_key_bytes()}")
     
     def init_connection(self):
         self.conn = self.socket.connect(("localhost", 6789))
         if self.is_registered:
-            print("Connecting...")
+            logger.debug("Registered, connecting to server...")
             self.connect()
         else:
-            print("Registering...")
+            logger.debug("Not registered, registering...")
             self.register()
+    
+    def sync(self):
+        if self.socket:
+            self.get_all_messages_from_server()
+        else:
+            logger.critical("No connection to server")
+            sys.exit(1)
 
     def load_state(self):
+        logger.debug("Loading state from file")
         state_json_file = json.load(importlib.resources.open_text(resources, f"{self.id}-state.json"))
         self.is_registered = state_json_file["is_registered"]
         # self.peers = state_json_file["peers"]
@@ -53,7 +68,7 @@ class Client:
         self.socket.send(reg_request)
 
         otc = self.socket.recv(6)
-        print(f"Got OTC over \"secured\" channel {otc}")
+        logger.debug(f"Got OTC over \"secured\" channel {otc}")
         enc_otc = self.server_public_key.encrypt(otc, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
                                                          algorithm=hashes.SHA256(),
                                                          label=None))
@@ -83,12 +98,12 @@ class Client:
     def send_message(self, peer_id, message):
         peer = self.get_peer(peer_id)
         if peer.status == PeerStatus.UNKOWN:
-            print("Unkonwn client - exchanging symmeteric key")
+            logger.debug("Unkonwn peer - exchanging symmeteric key")
             self.exchange_symmetric_key(peer_id)
 
         message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + b'MSG' + peer.aes_encrypt(message)
         self.socket.send(message_req)
-        peer.accept_message(peer_id, self.id, message)
+        peer.accept_message(peer_id, message, _from=False)
 
     def close(self):
         self.socket.close()
@@ -97,7 +112,7 @@ class Client:
         if importlib.resources.is_resource(resources,  f"{self.id}-private.pem"):
             return serialization.load_pem_private_key(
                 importlib.resources.read_binary(resources, f"{self.id}-private.pem"), password=None)
-        print("Generating new EC key pair, it will take some time so don't worry")
+        logger.info("Generating new RSA key pair")
         private = rsa.generate_private_key(public_exponent=65537,key_size=2048)
         private_pem = private.private_bytes(encoding=serialization.Encoding.PEM,
                                             format=serialization.PrivateFormat.PKCS8,
@@ -120,14 +135,14 @@ class Client:
         if not new_peer.is_known():
             peer_pk = self.get_public_key_of_peer_from_server(peer_id)
             new_peer.set_public_key(peer_pk)
-            print(f"Peer public key {peer_pk.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)}")
-            print(f"Got public key of {peer_id} from server")
+            logger.debug(f"Peer public key {peer_pk.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)}")
+            logger.info(f"Got public key of {peer_id} from server")
         
         shared_key_encrypted = new_peer.generate_shared_key()
-        print(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}")
+        logger.info(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}")
         exe_message_req = b'message ' + bytes(peer_id, 'utf-8') + b'\n\nSYN' 
         exe_message_req += shared_key_encrypted
-        print(f"Encrypted shared secret '{shared_key_encrypted}'")
+        logger.debug(f"Encrypted shared secret '{shared_key_encrypted}'")
         self.socket.send(exe_message_req)
         new_peer.status = PeerStatus.ASK
 
@@ -139,8 +154,11 @@ class Client:
         get_pk_req = b'get_public_key ' + bytes(peer_id, 'utf-8')
         signature = utils.sign(self.private_key, get_pk_req)
         get_pk_req += b'\n\n' + signature
-        self.socket.send(get_pk_req)
-        response_pk = self.socket.recv(4096)
+        response_pk = None
+        with self.conn_is_used:
+            self.socket.send(get_pk_req)
+            response_pk = self.socket.recv(4096)
+        logger.debug(f"PK response: {response_pk}")
         peer_pk, signature = response_pk[:451], response_pk[451:]
         if utils.verify_signature(self.server_public_key, peer_pk, signature):
             return serialization.load_pem_public_key(peer_pk)
@@ -154,7 +172,7 @@ class Client:
             if not data:
                 break
             messages += data
-        print(messages)
+        logger.debug(f"{messages}")
         self.handle_new_incoming_messages(messages[:-12])
     
     def show_messages(self, peer_id):
@@ -163,30 +181,42 @@ class Client:
     
     def handle_new_incoming_messages(self, messages):
         messages = messages.split(b'message ')
-        print(messages)
         for message in messages:
             if len(message) < 2:
                 continue
             peer_id, payload = message.split(b'\n\n')
             peer_id = peer_id.decode()
             msg_type, msg = payload[:3], payload[3:]
-            print(f"Got message from {peer_id}, msg_type={msg_type}, payload={msg}")
+            logger.debug(f"Got message from {peer_id}, msg_type={msg_type}, payload={msg}")
             peer = self.get_peer(peer_id)
+            
             if msg_type == b'SYN':
-                if not peer.is_known():
-                    peer_pk = self.get_public_key_of_peer_from_server(peer_id)
-                    peer.set_public_key(peer_pk)
-
                 shared_secret = utils.decrypt(self.private_key, msg)
                 peer.set_shared_key(shared_secret)
-                print(f"Shared secret {shared_secret}")
+                logger.debug(f"Shared secret {shared_secret}")
+            
             if msg_type == b'MSG':
                 if not peer.shared_key:
-                    print(f"No shared key with peer {peer_id}, skipping message")
+                    logger.debug(f"No shared key with peer {peer_id}, skipping message")
                     continue
                 dec_message_bytes = peer.aes_decrypt(msg)
                 peer.accept_message(self.id, dec_message_bytes.decode(), _from=False)
-                print("Decrypted message: ", dec_message_bytes)
+                logger.debug(f"Decrypted message: {dec_message_bytes}")
+            if msg_type ==b'ACK':
+                pass
+    
+    def recv_messages(self):
+        def recv_message():
+            while True:
+                sockets = [self.socket]
+                read_socket, _, _ = select(sockets, [], [])
+                if read_socket: 
+                    message = None
+                    with self.conn_is_used:
+                        message = self.socket.recv(4096)
+                    logger.info(f"Got new message {message}")
+                    self.handle_new_incoming_messages(message)
+        Thread(target=recv_message).start()
     
     def get_peer(self, peer_id):
         peer = self.peers.get(peer_id, Peer(peer_id))
