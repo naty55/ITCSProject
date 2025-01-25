@@ -69,15 +69,9 @@ class Client:
 
         otc = self.socket.recv(6)
         logger.debug(f"Got OTC over \"secured\" channel {otc}")
-        enc_otc = self.server_public_key.encrypt(otc, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                                                         algorithm=hashes.SHA256(),
-                                                         label=None))
+        enc_otc = utils.encrypt(self.server_public_key, otc)
         verify_otc_req = b'verify_otc\n\n'
-        signature = self.private_key.sign(otc, padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH),
-            hashes.SHA256()
-            )
+        signature = utils.sign(self.private_key, otc)
         verify_otc_req += enc_otc + signature
         self.socket.send(verify_otc_req)
         self.is_registered = True
@@ -86,11 +80,7 @@ class Client:
     def connect(self):
         id_bytes = bytes(self.id + '-hello-' + str(time.time()), "utf-8")
         connect_req = b'connect ' + id_bytes + b'\n\n'
-        signature = self.private_key.sign(id_bytes, padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH),
-            hashes.SHA256()
-            )
+        signature = utils.sign(self.private_key, id_bytes)
         connect_req += signature
         self.socket.send(connect_req)
     
@@ -202,7 +192,7 @@ class Client:
                 dec_message_bytes = peer.aes_decrypt(msg)
                 peer.accept_message(self.id, dec_message_bytes.decode(), _from=False)
                 logger.debug(f"Decrypted message: {dec_message_bytes}")
-            if msg_type ==b'ACK':
+            if msg_type == b'ACK':
                 pass
     
     def recv_messages(self):
