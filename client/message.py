@@ -14,11 +14,16 @@ class Message:
     
     def message_received(self):
         self.msg_status = "R"
+        print(self)
     
     def to_bytes(self, encryptor):
         return f"message {self.to_peer_id} {self.msg_id}\n\nMSG".encode() + encryptor(self.content)
     
     @staticmethod
-    def from_bytes(data, to_peer_id, timestamp, decryptor):
-        from_peer_id, msg_id, content = data.split(b' ')
-        return Message(from_peer_id.decode(), to_peer_id, msg_id.decode(), decryptor(content).decode(), timestamp, msg_status="R")
+    def from_bytes(header: bytes, data: bytes, to_peer_id: str, timestamp: str, decryptor):
+        from_peer_id, msg_id = header.split(b' ')
+        return Message(from_peer_id.decode(), to_peer_id, decryptor(data).decode(), msg_id.decode(), timestamp, msg_status="R")
+    
+    @staticmethod
+    def ack_message_bytes(msg_id: str, peer_id: str):
+        return f"message {peer_id} {msg_id}\n\nACK".encode()

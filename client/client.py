@@ -196,11 +196,15 @@ class Client:
                 if not peer.shared_key:
                     logger.debug(f"No shared key with peer {peer_id}, skipping message")
                     continue
-                dec_message_bytes = peer.aes_decrypt(msg)
-                peer.accept_message(self.id, dec_message_bytes.decode(), _from=False)
-                logger.debug(f"Decrypted message: {dec_message_bytes}")
+                msg_obj = Message.from_bytes(header, msg, self.id, str(time.time()), peer.aes_decrypt)
+                peer.message_received(msg_obj)
+                logger.debug(f"Decrypted message: {msg_obj.content}")
+                with self.conn_is_used:
+                    self.socket.send(Message.ack_message_bytes(msg_obj.msg_id, peer_id))
+            
             if msg_type == b'ACK':
-                pass
+                peer.ack_recieved(msg_id.decode())
+                logger.debug(f"Acknowledged message {msg_id}")
     
     def recv_messages(self):
         def recv_message():
@@ -211,6 +215,11 @@ class Client:
                     message = None
                     with self.conn_is_used:
                         message = self.socket.recv(4096)
+                    if not message:
+                        print("Server closed connection")
+                        logger.critical("Server closed connection")
+                        exit(1)
+                    
                     logger.info(f"Got new message {message}")
                     self.handle_new_incoming_messages(message)
         Thread(target=recv_message).start()

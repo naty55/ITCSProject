@@ -48,15 +48,17 @@ class Peer:
         self.next_message_no += 1
         return self.next_message_no
     
-    def accept_message(self, peer_id, message, _from=True):
-        from_peer_id = peer_id if _from else self.id
-        to_peer_id = self.id if _from else peer_id
-        timestamp = datetime.now().isoformat()
-        self.messages.append(Message(from_peer_id, to_peer_id, message, "-1", timestamp))
+    def message_received(self, message: Message):
+        self.messages.append(message)
     
     def message_sent(self, message: Message) -> None:
         self.messages.append(message)
         self.id_to_message[message.msg_id] = message
+        print(self.id_to_message)
+    
+    def ack_recieved(self, msg_id: str):
+        if msg_id in self.id_to_message:
+            self.id_to_message[msg_id].message_received()
 
     
     def aes_encrypt(self, plaintext) -> bytes:
