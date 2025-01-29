@@ -23,6 +23,8 @@ class Peer:
         self.status = PeerStatus.UNKOWN
         self.public_key = None
         self.messages = []
+        self.id_to_message = dict()
+        self.next_message_no = 0
     
     def is_known(self):
         return self.public_key is not None
@@ -34,9 +36,7 @@ class Peer:
         if shared_key:
             self.status = PeerStatus.KNOWN
             self.shared_key = shared_key
-    
-    def next_message_no(self):
-        return len(self.messages)
+
     
     def generate_shared_key(self):
         if not self.is_known():
@@ -44,15 +44,22 @@ class Peer:
         self.set_shared_key(os.urandom(32))
         return utils.encrypt(self.public_key, self.shared_key)
     
+    def get_next_message_no(self):
+        self.next_message_no += 1
+        return self.next_message_no
+    
     def accept_message(self, peer_id, message, _from=True):
         from_peer_id = peer_id if _from else self.id
         to_peer_id = self.id if _from else peer_id
         timestamp = datetime.now().isoformat()
-        self.messages.append(Message(from_peer_id, to_peer_id, message, str(self.next_message_no), timestamp))
-        self.next_message_no += 1
+        self.messages.append(Message(from_peer_id, to_peer_id, message, "-1", timestamp))
+    
+    def message_sent(self, message: Message) -> None:
+        self.messages.append(message)
+        self.id_to_message[message.msg_id] = message
 
     
-    def aes_encrypt(self, plaintext):
+    def aes_encrypt(self, plaintext) -> bytes:
         iv = os.urandom(16)
         padder = sym_padding.PKCS7(128).padder()
         padded_data = padder.update(bytes(plaintext, 'utf-8')) + padder.finalize()
@@ -62,7 +69,7 @@ class Peer:
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
         return iv + ciphertext
     
-    def aes_decrypt(self, iv_ciphertext):
+    def aes_decrypt(self, iv_ciphertext) -> bytes:
         iv = iv_ciphertext[:16]
         ciphertext = iv_ciphertext[16:]
 
@@ -73,6 +80,8 @@ class Peer:
         unpadder = sym_padding.PKCS7(128).unpadder()
         plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
         return plaintext
-
+    
+    def __str__(self):
+        return f"Peer {self.id} - {self.status} - {self.shared_key}"
     
 

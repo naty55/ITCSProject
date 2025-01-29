@@ -1,5 +1,5 @@
 import socket
-from threading import Thread
+from threading import Thread, Lock
 from config import SERVER_HOST, SERVER_PORT
 from cryptography.hazmat.primitives import serialization,hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -49,6 +49,7 @@ class Server:
                 data = conn.recv(4096)
                 if not data:
                     client['has_session'] = False
+                    del client['conn']
                     break
                 if data.startswith(b'get_public_key'):
                     self.handle_get_public_key(data, client, conn)
@@ -58,6 +59,7 @@ class Server:
                     self.handle_message_request(data, client, conn)
             except ConnectionResetError:
                 client['has_session'] = False
+                del client['conn']
                 break
 
     def handle_register_request(self, conn, client_id, payload):
@@ -93,6 +95,8 @@ class Server:
             return False
         
         print(f"Successfully registered {client_id}")
+        new_client['conn'] = conn
+        new_client['conn_mutex'] = Lock()
         new_client['has_session'] = True
         new_client['incoming_messages'] = []
         self.registered_clients[client_id] = new_client
@@ -118,6 +122,8 @@ class Server:
             return 
 
         print(f"{client_id} has been successfully connected")
+        client['conn'] = conn
+        client['conn_mutex'] = Lock()
         client['has_session'] = True
         return client
     
@@ -144,23 +150,26 @@ class Server:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
         signature = utils.sign(self.pri_key, public_key_bytes)
-        conn.send(public_key_bytes + signature)
+        with client['conn_mutex']:
+            conn.send(public_key_bytes + signature)
 
     def handle_get_all_messages(self, request_bytes, client, conn):
         print(f'{client["id"]} is asking all waiting messages')
         messages_to_send = client.get("messages", [])
-        messages_bytes = b''
-
-        for message in messages_to_send:
-            messages_bytes += b'message ' + bytes(message['from'], 'utf-8') + b'\n\n' + message['message']
-        
+        messages_bytes = b''.join(messages_to_send)
         messages_bytes += b'----DONE----'
         conn.send(messages_bytes)
+        sent_messages = client.get("sent_messages", [])
+        sent_messages.extend(messages_to_send)
+        client['sent_messages'] = sent_messages
+        client['messages'] = []
         
 
     def handle_message_request(self, request_bytes, client, conn):
+        print(request_bytes)
         header, payload = request_bytes.split(b'\n\n')
-        req_type, peer_id = header.split(b' ')
+        print(header)
+        req_type, peer_id, msg_id  = header.split(b' ')
         if req_type != b'message':
             return 
         peer_id = peer_id.decode()
@@ -169,15 +178,20 @@ class Server:
             return 
         peer = self.registered_clients[peer_id]
         print(f"Message from {client['id']} to {peer_id}: {payload}")
-        messages = peer.get("messages", [])
-        if len(messages) >= 10:
-            print(f"Inbox of peer {peer_id} is full")
-            return 
-        peer['messages'] = messages
-        messages.append({
-            "from": client['id'],
-            "message": payload
-        })
+
+        message = b'message ' + bytes(client['id'], 'utf-8') + b' ' + msg_id + b'\n\n' + payload
+        
+        if peer['has_session']:
+            peer_conn = peer['conn']
+            with peer['conn_mutex']:
+                peer_conn.send(message)
+        else:
+            messages = peer.get("messages", [])
+            peer['messages'] = messages
+            if len(messages) >= 10:
+                print(f"Inbox of peer {peer_id} is full")
+                return 
+            messages.append(message)
 
     def send_by_secure_channel(self, client_id, conn, client):
         otc = utils.generate_otc()

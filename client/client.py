@@ -5,6 +5,7 @@ import json
 import utils
 import sys
 from peer import PeerStatus, Peer
+from message import Message
 from logger import logger
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -19,7 +20,7 @@ class Client:
         self.private_key = self.load_private_key()
         self.public_key = self.private_key.public_key()
         self.server_public_key = Client.load_server_public_key()
-        self.peers = dict()
+        self.peers: dict[str, Peer] = dict()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.conn_is_used = Lock()
         self.conn = None
@@ -85,15 +86,16 @@ class Client:
         self.socket.send(connect_req)
     
 
-    def send_message(self, peer_id, message):
+    def send_message(self, peer_id: str, message: str):
         peer = self.get_peer(peer_id)
         if peer.status == PeerStatus.UNKOWN:
             logger.debug("Unkonwn peer - exchanging symmeteric key")
             self.exchange_symmetric_key(peer_id)
-
-        message_req = b'message ' + bytes(peer_id, "utf-8") + b"\n\n" + b'MSG' + peer.aes_encrypt(message)
+        message = Message(self.id, peer_id, message, str(peer.get_next_message_no()), str(time.time()))
+        message_req = message.to_bytes(peer.aes_encrypt)
+        print(message_req)
         self.socket.send(message_req)
-        peer.accept_message(peer_id, message, _from=False)
+        peer.message_sent(message)
 
     def close(self):
         self.socket.close()
@@ -130,7 +132,7 @@ class Client:
         
         shared_key_encrypted = new_peer.generate_shared_key()
         logger.info(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}")
-        exe_message_req = b'message ' + bytes(peer_id, 'utf-8') + b'\n\nSYN' 
+        exe_message_req = b'message ' + bytes(peer_id, 'utf-8') + b' 0\n\nSYN' 
         exe_message_req += shared_key_encrypted
         logger.debug(f"Encrypted shared secret '{shared_key_encrypted}'")
         self.socket.send(exe_message_req)
@@ -165,7 +167,10 @@ class Client:
         logger.debug(f"{messages}")
         self.handle_new_incoming_messages(messages[:-12])
     
-    def show_messages(self, peer_id):
+    def show_messages(self, peer_id: str):
+        if peer_id not in self.peers:
+            print("No messages from this peer")
+            return
         for message in self.peers[peer_id].messages:
             print(message)
     
@@ -174,11 +179,13 @@ class Client:
         for message in messages:
             if len(message) < 2:
                 continue
-            peer_id, payload = message.split(b'\n\n')
+            header, payload = message.split(b'\n\n')
+            peer_id, msg_id = header.split(b' ')
             peer_id = peer_id.decode()
             msg_type, msg = payload[:3], payload[3:]
             logger.debug(f"Got message from {peer_id}, msg_type={msg_type}, payload={msg}")
             peer = self.get_peer(peer_id)
+            logger.debug(str(self.peers))
             
             if msg_type == b'SYN':
                 shared_secret = utils.decrypt(self.private_key, msg)
@@ -212,7 +219,7 @@ class Client:
         peer = self.peers.get(peer_id, Peer(peer_id))
         self.peers[peer_id] = peer
         return peer
-            
+
 
 
 
