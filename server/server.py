@@ -145,11 +145,9 @@ class Server:
             return
 
         peer = self.registered_clients[peer_id]
-        public_key_bytes = peer['public_key'].public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
+        public_key_bytes = utils.serialize_public_key(peer['public_key'])
         signature = utils.sign(self.pri_key, public_key_bytes)
+        
         with client['conn_mutex']:
             conn.send(public_key_bytes + signature)
 

@@ -8,8 +8,8 @@ import sys
 from peer import PeerStatus, Peer
 from message import Message
 from logger import logger
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 import importlib.resources 
 import resources
 from select import select
@@ -103,7 +103,6 @@ class Client:
             self.exchange_symmetric_key(peer_id)
         message = Message(self.id, peer_id, message, str(peer.get_next_message_no()), str(time.time()))
         message_req = message.to_bytes(peer.aes_encrypt)
-        print(message_req)
         self.socket.send(message_req)
         peer.message_sent(message)
 
@@ -151,7 +150,7 @@ class Client:
         new_peer.status = PeerStatus.ASK
 
 
-    def get_public_key_of_peer_from_server(self, peer_id):
+    def get_public_key_of_peer_from_server(self, peer_id: str):
         """
         Will make a blocking call to server asking for peer public key
         """
@@ -165,7 +164,7 @@ class Client:
         logger.debug(f"PK response: {response_pk}")
         peer_pk, signature = response_pk[:451], response_pk[451:]
         if utils.verify_signature(self.server_public_key, peer_pk, signature):
-            return serialization.load_pem_public_key(peer_pk)
+            return utils.load_public_key(peer_pk)
         raise Exception("Couldn't verify response peer pk response")
     
     def get_all_messages_from_server(self):
