@@ -41,3 +41,12 @@ def decrypt(pri_key, enc_message):
                                                      algorithm=hashes.SHA256(),
                                                      label=None
                                                      ))
+
+def serialize_public_key(public_key):
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+def load_public_key(public_key):
+    return serialization.load_pem_public_key(public_key)

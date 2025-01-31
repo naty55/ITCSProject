@@ -18,13 +18,13 @@ class PeerStatus(Enum):
 
 class Peer:
     def __init__(self, peer_id):
-        self.id = peer_id
-        self.shared_key = None
-        self.status = PeerStatus.UNKOWN
+        self.id :str = peer_id
+        self.shared_key : bytes = None
+        self.status :PeerStatus = PeerStatus.UNKOWN
         self.public_key = None
-        self.messages = []
-        self.id_to_message = dict()
-        self.next_message_no = 0
+        self.messages: list[Message] = []
+        self.id_to_message: dict[str, Message] = dict()
+        self.next_message_no: int = 0
     
     def is_known(self):
         return self.public_key is not None
@@ -85,5 +85,16 @@ class Peer:
     
     def __str__(self):
         return f"Peer {self.id} - {self.status} - {self.shared_key}"
+    
+    def __getstate__(self):
+        print("Pickeld")
+        state = self.__dict__.copy()
+        state['public_key'] = utils.serialize_public_key(self.public_key)
+        return state
+    
+    def __setstate__(self, state):
+        print("Unpickled")
+        state['public_key'] = utils.load_public_key(state['public_key'])
+        self.__dict__.update(state)
     
 

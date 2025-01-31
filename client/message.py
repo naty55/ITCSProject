@@ -14,7 +14,6 @@ class Message:
     
     def message_received(self):
         self.msg_status = "R"
-        print(self)
     
     def to_bytes(self, encryptor):
         return f"message {self.to_peer_id} {self.msg_id}\n\nMSG".encode() + encryptor(self.content)

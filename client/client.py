@@ -2,6 +2,7 @@ import socket
 import os 
 import time
 import json
+import pickle
 import utils
 import sys
 from peer import PeerStatus, Peer
@@ -27,6 +28,7 @@ class Client:
         self.is_registered = False
         self.outgoing_messages = []
         self.load_state()
+        self.load_peers()
         self.init_connection()
         self.sync()
         self.recv_messages()
@@ -52,16 +54,24 @@ class Client:
         logger.debug("Loading state from file")
         state_json_file = json.load(importlib.resources.open_text(resources, f"{self.id}-state.json"))
         self.is_registered = state_json_file["is_registered"]
-        # self.peers = state_json_file["peers"]
+    
+    def load_peers(self):
+        logger.debug("Loading peers from file")
+        peers_file = pickle.load(importlib.resources.open_binary(resources, f"{self.id}-peers.pkl"))
+        self.peers = peers_file
+    
+    def update_peers(self):
+        with open(f"{os.path.dirname(__file__)}/resources/{self.id}-peers.pkl", "wb") as peers_file:
+            pickle.dump(self.peers, peers_file)
 
     
     def update_state(self):
         state = {
-            "is_registered": self.is_registered,
-            # "peers": self.peers
+            "is_registered": self.is_registered
         }
         with open(f"{os.path.dirname(__file__)}/resources/{self.id}-state.json", "w") as state_file:
             json.dump(state, state_file)
+        
     
     def register(self):
         public_key_bytes = self.get_public_key_bytes()
@@ -99,6 +109,8 @@ class Client:
 
     def close(self):
         self.socket.close()
+        self.update_peers()
+        self.update_state()
 
     def load_private_key(self):
         if importlib.resources.is_resource(resources,  f"{self.id}-private.pem"):
@@ -115,10 +127,10 @@ class Client:
         return private
     
     def load_server_public_key():
-        return serialization.load_pem_public_key(importlib.resources.read_binary(resources, "server.pem"))
+        return utils.load_public_key(importlib.resources.read_binary(resources, "server.pem"))
     
     def get_public_key_bytes(self):
-        return self.public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        return utils.serialize_public_key(self.public_key)
     
     def exchange_symmetric_key(self, peer_id):
         new_peer = self.get_peer(peer_id)
@@ -208,26 +220,36 @@ class Client:
     
     def recv_messages(self):
         def recv_message():
-            while True:
-                sockets = [self.socket]
-                read_socket, _, _ = select(sockets, [], [])
-                if read_socket: 
-                    message = None
-                    with self.conn_is_used:
-                        message = self.socket.recv(4096)
-                    if not message:
-                        print("Server closed connection")
-                        logger.critical("Server closed connection")
-                        exit(1)
-                    
-                    logger.info(f"Got new message {message}")
-                    self.handle_new_incoming_messages(message)
+            try: 
+                while True:
+                    sockets = [self.socket]
+                    read_socket, _, _ = select(sockets, [], [])
+                    if read_socket: 
+                        message = None
+                        with self.conn_is_used:
+                            message = self.socket.recv(4096)
+                        if not message:
+                            print("Server closed connection")
+                            logger.critical("Server closed connection")
+                            exit(1)
+                        
+                        logger.info(f"Got new message {message}")
+                        self.handle_new_incoming_messages(message)
+            except OSError:
+                logger.exception("Error in recv_message loop, connection is closed")
         Thread(target=recv_message).start()
     
     def get_peer(self, peer_id):
         peer = self.peers.get(peer_id, Peer(peer_id))
         self.peers[peer_id] = peer
         return peer
+    
+    def show_peers(self):
+        peers_str = "\n".join([f"{peer[0]} : {peer}" for peer in sorted(self.peers.keys())])
+        if not peers_str:
+            print("No peers yet :(")
+        else:
+            print(peers_str)
 
 
 
