@@ -1,0 +1,1 @@
+start cmd /k "set client_id=111111111&& .\.venv\Scripts\python.exe .\client\main.py"
