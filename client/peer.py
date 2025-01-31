@@ -5,7 +5,7 @@ from message import Message
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
-
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 
 class PeerStatus(Enum):
@@ -21,7 +21,7 @@ class Peer:
         self.id :str = peer_id
         self.shared_key : bytes = None
         self.status :PeerStatus = PeerStatus.UNKOWN
-        self.public_key = None
+        self.public_key : RSAPublicKey = None
         self.messages: list[Message] = []
         self.id_to_message: dict[str, Message] = dict()
         self.next_message_no: int = 0
@@ -29,10 +29,10 @@ class Peer:
     def is_known(self):
         return self.public_key is not None
     
-    def set_public_key(self, public_key):
+    def set_public_key(self, public_key: RSAPublicKey):
         self.public_key = public_key
     
-    def set_shared_key(self, shared_key):
+    def set_shared_key(self, shared_key: bytes):
         if shared_key:
             self.status = PeerStatus.KNOWN
             self.shared_key = shared_key
@@ -61,7 +61,7 @@ class Peer:
             self.id_to_message[msg_id].message_received()
 
     
-    def aes_encrypt(self, plaintext) -> bytes:
+    def aes_encrypt(self, plaintext: str) -> bytes:
         iv = os.urandom(16)
         padder = sym_padding.PKCS7(128).padder()
         padded_data = padder.update(bytes(plaintext, 'utf-8')) + padder.finalize()
@@ -87,13 +87,11 @@ class Peer:
         return f"Peer {self.id} - {self.status} - {self.shared_key}"
     
     def __getstate__(self):
-        print("Pickeld")
         state = self.__dict__.copy()
         state['public_key'] = utils.serialize_public_key(self.public_key)
         return state
     
     def __setstate__(self, state):
-        print("Unpickled")
         state['public_key'] = utils.load_public_key(state['public_key'])
         self.__dict__.update(state)
     
