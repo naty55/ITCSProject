@@ -52,13 +52,19 @@ class Client:
 
     def load_state(self):
         logger.debug("Loading state from file")
-        state_json_file = json.load(importlib.resources.open_text(resources, f"{self.id}-state.json"))
-        self.is_registered = state_json_file["is_registered"]
+        try:
+            state_json_file = json.load(importlib.resources.open_text(resources, f"{self.id}-state.json"))
+            self.is_registered = state_json_file["is_registered"]
+        except Exception as e:
+            logger.error(f"Couldn't load state - {e}")
     
     def load_peers(self):
         logger.debug("Loading peers from file")
-        peers_file = pickle.load(importlib.resources.open_binary(resources, f"{self.id}-peers.pkl"))
-        self.peers = peers_file
+        try:
+            peers_file = pickle.load(importlib.resources.open_binary(resources, f"{self.id}-peers.pkl"))
+            self.peers = peers_file
+        except Exception as e:
+            logger.error(f"Couldn't load peers - {e}")
     
     def update_peers(self):
         with open(f"{os.path.dirname(__file__)}/resources/{self.id}-peers.pkl", "wb") as peers_file:
@@ -211,11 +217,16 @@ class Client:
                 peer.message_received(msg_obj)
                 logger.debug(f"Decrypted message: {msg_obj.content}")
                 with self.conn_is_used:
-                    self.socket.send(Message.ack_message_bytes(msg_obj.msg_id, peer_id))
+                    self.socket.send(Message.ack_message_bytes(msg_obj.msg_id, peer_id, peer.generate_hmac))
             
             if msg_type == b'ACK':
-                peer.ack_recieved(msg_id.decode())
-                logger.debug(f"Acknowledged message {msg_id}")
+                print("Veryfying HMAC of ACK")
+                if peer.verify_hmac(f"{self.id} {msg_id.decode()}", msg):
+                    peer.ack_recieved(msg_id.decode())
+                    logger.debug(f"Acknowledged message {msg_id}")
+                else:
+                    logger.error(f"Couldn't verify signature of message {msg_id} from {peer.id}")
+                
     
     def recv_messages(self):
         def recv_message():
@@ -228,7 +239,7 @@ class Client:
                         with self.conn_is_used:
                             message = self.socket.recv(4096)
                         if not message:
-                            print("Server closed connection")
+                            print("Server closed connection, exiting...")
                             logger.critical("Server closed connection")
                             exit(1)
                         

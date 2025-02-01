@@ -24,5 +24,5 @@ class Message:
         return Message(from_peer_id.decode(), to_peer_id, decryptor(data).decode(), msg_id.decode(), timestamp, msg_status="R")
     
     @staticmethod
-    def ack_message_bytes(msg_id: str, peer_id: str):
-        return f"message {peer_id} {msg_id}\n\nACK".encode()
+    def ack_message_bytes(msg_id: str, peer_id: str, signer):
+        return f"message {peer_id} {msg_id}\n\nACK".encode() + signer(f"{peer_id} {msg_id}")

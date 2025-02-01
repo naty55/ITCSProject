@@ -2,9 +2,9 @@ from enum import Enum
 import utils
 import os
 from message import Message
-from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding as sym_padding
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding as sym_padding, hmac, hashes
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 
@@ -38,7 +38,7 @@ class Peer:
             self.shared_key = shared_key
 
     
-    def generate_shared_key(self):
+    def generate_shared_key(self) -> bytes:
         if not self.is_known():
             raise Exception("Can't generate shared key without public key")
         self.set_shared_key(os.urandom(32))
@@ -62,6 +62,8 @@ class Peer:
 
     
     def aes_encrypt(self, plaintext: str) -> bytes:
+        if not self.shared_key:
+            raise Exception("No shared key")
         iv = os.urandom(16)
         padder = sym_padding.PKCS7(128).padder()
         padded_data = padder.update(bytes(plaintext, 'utf-8')) + padder.finalize()
@@ -71,7 +73,9 @@ class Peer:
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
         return iv + ciphertext
     
-    def aes_decrypt(self, iv_ciphertext) -> bytes:
+    def aes_decrypt(self, iv_ciphertext: bytes) -> bytes:
+        if not self.shared_key:
+            raise Exception("No shared key")
         iv = iv_ciphertext[:16]
         ciphertext = iv_ciphertext[16:]
 
@@ -82,6 +86,18 @@ class Peer:
         unpadder = sym_padding.PKCS7(128).unpadder()
         plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
         return plaintext
+    
+    def generate_hmac(self, message: str):
+        if not self.shared_key:
+            raise Exception("No shared key")
+        h = hmac.HMAC(self.shared_key, hashes.SHA256(), backend=default_backend())
+        h.update(message.encode())
+        return h.finalize()
+    
+    def verify_hmac(self, message: str, signature: bytes):
+        print(f"Meesgae : {message}, Signature: {signature}")
+        h = self.generate_hmac(message)
+        return h == signature
     
     def __str__(self):
         return f"Peer {self.id} - {self.status} - {self.shared_key}"
