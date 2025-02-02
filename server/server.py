@@ -79,11 +79,7 @@ class Server:
         header, payload = data.split(b'\n\n', 1)
         req_type = header
         otc_enc, signature = payload[:256], payload[256:]
-        otc = self.pri_key.decrypt(otc_enc, padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None)
-        )
+        otc = utils.decrypt(self.pri_key, otc_enc)
         
         if req_type != b'verify_otc':
             return False
