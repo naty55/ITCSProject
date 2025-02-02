@@ -17,7 +17,6 @@ class Message:
     
     def to_bytes(self, encryptor, signer = None):
         hmac = signer(self.content)
-        print(f"Length of signature is {len(hmac)}")
         return f"message {self.to_peer_id} {self.msg_id}\n\nMSG".encode() + encryptor(self.content) + hmac
     
     @staticmethod
@@ -26,9 +25,16 @@ class Message:
         content, signature = data[:-32], data[-32:]
         message =  Message(from_peer_id.decode(), to_peer_id, decryptor(content).decode(), msg_id.decode(), timestamp, msg_status="R")
         calc_signature = signer(message.content)
-        print(calc_signature == signature)
+        if calc_signature != signature:
+            raise Exception(f"Couldn't verify HMAC signature for message {message.msg_id} from {message.from_peer_id} to {message.to_peer_id}")
         return message
     
     @staticmethod
     def ack_message_bytes(msg_id: str, peer_id: str, signer):
         return f"message {peer_id} {msg_id}\n\nACK".encode() + signer(f"{peer_id} {msg_id}")
+    
+    @staticmethod
+    def syn_message_bytes(peer_id, shared_key_generator):
+        shared_key_encrypted = shared_key_generator() 
+        return f"message {peer_id} \n\nSYN".encode() + shared_key_encrypted
+    

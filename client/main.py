@@ -15,7 +15,13 @@ def handle_user_command(command, client):
     global running
     if command.startswith("message ") or command.startswith("m "):
         command, peer_id, message = command.split(' ', 2)
-        client.send_message(peer_id.strip(), message)
+        if len(peer_id) == 1:
+            peer_id = peer_id * 9
+        if utils.validate_client_id(peer_id):
+            client.send_message(peer_id.strip(), message)
+        else:
+            print(f"'{peer_id}' is not a valid peer id")
+    
     if command.startswith("show ") or command.startswith("s ") or command.strip() == 's':
         if command.strip() == 's':
             client.show_peers()

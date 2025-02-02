@@ -54,7 +54,6 @@ class Peer:
     def message_sent(self, message: Message) -> None:
         self.messages.append(message)
         self.id_to_message[message.msg_id] = message
-        print(self.id_to_message)
     
     def ack_recieved(self, msg_id: str):
         if msg_id in self.id_to_message:
@@ -102,12 +101,12 @@ class Peer:
     
     def __getstate__(self):
         state = self.__dict__.copy()
-        if 'public_key' in state:
-            state['public_ key'] = utils.serialize_public_key(self.public_key)
+        if state['public_key']: # Replace RSAPublicKey object with bytes as it can't be pickled
+            state['public_key'] = utils.serialize_public_key(self.public_key)
         return state
     
     def __setstate__(self, state):
-        if 'public_key' in state:
+        if state['public_key']:
             state['public_key'] = utils.load_public_key(state['public_key'])
         self.__dict__.update(state)
     

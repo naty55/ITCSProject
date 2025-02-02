@@ -119,6 +119,7 @@ class Client:
 
     def load_private_key(self):
         if importlib.resources.is_resource(resources,  f"{self.id}-private.pem"):
+            logger.info("Found a private key, Loading..")
             return serialization.load_pem_private_key(
                 importlib.resources.read_binary(resources, f"{self.id}-private.pem"), password=None)
         logger.info("Generating new RSA key pair")
@@ -147,11 +148,8 @@ class Client:
             logger.debug(f"Peer public key {peer_pk.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)}")
             logger.info(f"Got public key of {peer_id} from server")
         
-        shared_key_encrypted = new_peer.generate_shared_key()
-        logger.info(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}")
-        exe_message_req = b'message ' + bytes(peer_id, 'utf-8') + b' 0\n\nSYN' 
-        exe_message_req += shared_key_encrypted
-        logger.debug(f"Encrypted shared secret '{shared_key_encrypted}'")
+        exe_message_req = Message.syn_message_bytes(peer_id, new_peer.generate_shared_key)
+        logger.info(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}, share secret is encrypted with peer public key")
         self.socket.send(exe_message_req)
         new_peer.status = PeerStatus.ASK
 
@@ -213,14 +211,19 @@ class Client:
                 if not peer.shared_key:
                     logger.debug(f"No shared key with peer {peer_id}, skipping message")
                     continue
-                msg_obj = Message.from_bytes(header, msg, self.id, str(time.time()), peer.aes_decrypt, peer.generate_hmac)
-                peer.message_received(msg_obj)
-                logger.debug(f"Decrypted message: {msg_obj.content}")
-                with self.conn_lock:
-                    self.socket.send(Message.ack_message_bytes(msg_obj.msg_id, peer_id, peer.generate_hmac))
+                try:
+                    logger.info("Starting decrypting and verifying message")
+                    msg_obj = Message.from_bytes(header, msg, self.id, str(time.time()), peer.aes_decrypt, peer.generate_hmac)
+                    peer.message_received(msg_obj)
+                except Exception as e:
+                    logger.error(e)
+                else:
+                    logger.debug(f"Decrypted message: {msg_obj.content}")
+                    with self.conn_lock:
+                        self.socket.send(Message.ack_message_bytes(msg_obj.msg_id, peer_id, peer.generate_hmac))
             
             if msg_type == b'ACK':
-                print("Veryfying HMAC of ACK")
+                logger.info("Veryfying HMAC of ACK")
                 if peer.verify_hmac(f"{self.id} {msg_id.decode()}", msg):
                     peer.ack_recieved(msg_id.decode())
                     logger.debug(f"Acknowledged message {msg_id}")
