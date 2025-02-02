@@ -108,7 +108,7 @@ class Client:
             logger.debug("Unkonwn peer - exchanging symmeteric key")
             self.exchange_symmetric_key(peer_id)
         message = Message(self.id, peer_id, message, str(peer.get_next_message_no()), str(time.time()))
-        message_req = message.to_bytes(peer.aes_encrypt)
+        message_req = message.to_bytes(peer.aes_encrypt, peer.generate_hmac)
         self.socket.send(message_req)
         peer.message_sent(message)
 
@@ -213,7 +213,7 @@ class Client:
                 if not peer.shared_key:
                     logger.debug(f"No shared key with peer {peer_id}, skipping message")
                     continue
-                msg_obj = Message.from_bytes(header, msg, self.id, str(time.time()), peer.aes_decrypt)
+                msg_obj = Message.from_bytes(header, msg, self.id, str(time.time()), peer.aes_decrypt, peer.generate_hmac)
                 peer.message_received(msg_obj)
                 logger.debug(f"Decrypted message: {msg_obj.content}")
                 with self.conn_lock:

@@ -10,18 +10,24 @@ class Message:
     msg_status: str = "S"
 
     def __str__(self):
-        return f"{self.from_peer_id} - {self.msg_id} - {'V' * (2 if self.msg_status == 'R' else 1)} - {self.timestamp}: {self.content}"
+        return f"{self.from_peer_id} - {self.msg_id} - {self.msg_status} - {self.timestamp}: {self.content}"
     
     def message_received(self):
         self.msg_status = "R"
     
-    def to_bytes(self, encryptor):
-        return f"message {self.to_peer_id} {self.msg_id}\n\nMSG".encode() + encryptor(self.content)
+    def to_bytes(self, encryptor, signer = None):
+        hmac = signer(self.content)
+        print(f"Length of signature is {len(hmac)}")
+        return f"message {self.to_peer_id} {self.msg_id}\n\nMSG".encode() + encryptor(self.content) + hmac
     
     @staticmethod
-    def from_bytes(header: bytes, data: bytes, to_peer_id: str, timestamp: str, decryptor):
+    def from_bytes(header: bytes, data: bytes, to_peer_id: str, timestamp: str, decryptor, signer=None):
         from_peer_id, msg_id = header.split(b' ')
-        return Message(from_peer_id.decode(), to_peer_id, decryptor(data).decode(), msg_id.decode(), timestamp, msg_status="R")
+        content, signature = data[:-32], data[-32:]
+        message =  Message(from_peer_id.decode(), to_peer_id, decryptor(content).decode(), msg_id.decode(), timestamp, msg_status="R")
+        calc_signature = signer(message.content)
+        print(calc_signature == signature)
+        return message
     
     @staticmethod
     def ack_message_bytes(msg_id: str, peer_id: str, signer):

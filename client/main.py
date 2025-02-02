@@ -17,10 +17,10 @@ def handle_user_command(command, client):
         command, peer_id, message = command.split(' ', 2)
         client.send_message(peer_id.strip(), message)
     if command.startswith("show ") or command.startswith("s ") or command.strip() == 's':
-        command, peer_id = command.split(' ', 1)
-        if not peer_id:
+        if command.strip() == 's':
             client.show_peers()
             return
+        command, peer_id = command.split(' ', 1)
         if len(peer_id) == 1: # Tricks only for demo - in real life logic is more complex
             peer_id = peer_id * 9
         if utils.validate_client_id(peer_id):
@@ -40,12 +40,13 @@ def main_loop(client: Client):
     while running:
         try: 
             command = input(">")
+            logger.debug(f"Got command {command}")
             handle_user_command(command, client)
         except KeyboardInterrupt:
             running = False
         except Exception as e:
             logger.exception(f"Error in main loop - {e}")
-            pass
+        
     client.close()
     print("Yalla bye!")
 

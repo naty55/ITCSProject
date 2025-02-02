@@ -89,26 +89,26 @@ class Peer:
     
     def generate_hmac(self, message: str):
         if not self.shared_key:
-            raise Exception("No shared key")
-        h = hmac.HMAC(self.shared_key, hashes.SHA256(), backend=default_backend())
-        h.update(message.encode())
-        return h.finalize()
+            raise Exception("No shared Key - can't generate HMAC signature")
+        return utils.generate_hmac(self.shared_key, message)
     
     def verify_hmac(self, message: str, signature: bytes):
-        print(f"Meesgae : {message}, Signature: {signature}")
-        h = self.generate_hmac(message)
-        return h == signature
+        if not self.shared_key:
+            raise Exception("No shared Key - can't verify signature")
+        return utils.verify_hmac(self.shared_key, message, signature)
     
     def __str__(self):
         return f"Peer {self.id} - {self.status} - {self.shared_key}"
     
     def __getstate__(self):
         state = self.__dict__.copy()
-        state['public_key'] = utils.serialize_public_key(self.public_key)
+        if 'public_key' in state:
+            state['public_ key'] = utils.serialize_public_key(self.public_key)
         return state
     
     def __setstate__(self, state):
-        state['public_key'] = utils.load_public_key(state['public_key'])
+        if 'public_key' in state:
+            state['public_key'] = utils.load_public_key(state['public_key'])
         self.__dict__.update(state)
     
 

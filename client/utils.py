@@ -2,6 +2,7 @@ from cryptography.hazmat.primitives import serialization,hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPrivateKey
+from cryptography.hazmat.backends import default_backend
 import random
 
 valid_phone_numbers = {str(i) * 9 for i in range(10)} # phone number is of pattern "ddddddddd" e.g. "111111111"
@@ -51,3 +52,15 @@ def serialize_public_key(public_key: RSAPublicKey) -> bytes:
 
 def load_public_key(public_key: bytes) -> RSAPublicKey:
     return serialization.load_pem_public_key(public_key)
+
+
+def generate_hmac(shared_key: bytes, message: str) -> bytes:
+    h = hmac.HMAC(shared_key, hashes.SHA256(), backend=default_backend())
+    h.update(message.encode())
+    return h.finalize()
+
+def verify_hmac(shared_key: bytes, message: str, signature: bytes) -> bool:
+    print(f"Meesgae : {message}, Signature: {signature}")
+    h = generate_hmac(shared_key, message)
+    return h == signature
+    
