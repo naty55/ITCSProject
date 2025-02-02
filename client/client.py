@@ -23,7 +23,7 @@ class Client:
         self.server_public_key = Client.load_server_public_key()
         self.peers: dict[str, Peer] = dict()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.conn_is_used = Lock()
+        self.conn_lock = Lock()
         self.conn = None
         self.is_registered = False
         self.outgoing_messages = []
@@ -164,7 +164,7 @@ class Client:
         signature = utils.sign(self.private_key, get_pk_req)
         get_pk_req += b'\n\n' + signature
         response_pk = None
-        with self.conn_is_used:
+        with self.conn_lock:
             self.socket.send(get_pk_req)
             response_pk = self.socket.recv(4096)
         logger.debug(f"PK response: {response_pk}")
@@ -216,7 +216,7 @@ class Client:
                 msg_obj = Message.from_bytes(header, msg, self.id, str(time.time()), peer.aes_decrypt)
                 peer.message_received(msg_obj)
                 logger.debug(f"Decrypted message: {msg_obj.content}")
-                with self.conn_is_used:
+                with self.conn_lock:
                     self.socket.send(Message.ack_message_bytes(msg_obj.msg_id, peer_id, peer.generate_hmac))
             
             if msg_type == b'ACK':
@@ -236,7 +236,7 @@ class Client:
                     read_socket, _, _ = select(sockets, [], [])
                     if read_socket: 
                         message = None
-                        with self.conn_is_used:
+                        with self.conn_lock:
                             message = self.socket.recv(4096)
                         if not message:
                             print("Server closed connection, exiting...")

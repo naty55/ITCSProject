@@ -191,7 +191,10 @@ class Server:
                 return 
             messages.append(message)
 
-    def send_by_secure_channel(self, client_id, conn, client):
+    def SendBySecureChannel(self, client_id, conn, client):
+        """
+        Simulate real sending OTC over secure channel to client 
+        """
         otc = utils.generate_otc()
         client['otc'] = otc
         conn.send(bytes(otc,"utf-8"))
