@@ -51,3 +51,6 @@ def serialize_public_key(public_key: RSAPublicKey) -> bytes:
 
 def load_public_key(public_key: bytes) -> RSAPublicKey:
     return serialization.load_pem_public_key(public_key)
+
+def load_private_key(private_key: bytes) -> RSAPrivateKey:
+    return serialization.load_pem_private_key(private_key, password=None)
