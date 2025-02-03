@@ -10,15 +10,17 @@ def print_help():
     print("show command to show chat with other peer, e.g. 'show 111111111' you can also use s as shortcut e.g. s 111111111")
     print("message command to send message to another peer, e.g. 'message 111111111 hello' you can also use m as shortcut")
 
-def handle_user_command(command, client):
+def handle_user_command(command: str, client: Client):
     command = command.strip()
     global running
-    if command.startswith("message ") or command.startswith("m "):
+    if command.startswith("message ") or command.startswith("m ") or command.startswith("ms "):
         command, peer_id, message = command.split(' ', 2)
         if len(peer_id) == 1:
             peer_id = peer_id * 9
         if utils.validate_client_id(peer_id):
             client.send_message(peer_id.strip(), message)
+            if command == "ms":
+                client.show_messages(peer_id.strip())
         else:
             print(f"'{peer_id}' is not a valid peer id")
     

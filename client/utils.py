@@ -4,11 +4,12 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPrivateKey
 from cryptography.hazmat.backends import default_backend
 import random
+import os
 
 valid_phone_numbers = {str(i) * 9 for i in range(10)} # phone number is of pattern "ddddddddd" e.g. "111111111"
 
 def validate_client_id(client_id: str):
-    return client_id in valid_phone_numbers
+    return client_id in valid_phone_numbers and client_id != os.environ['client_id'].strip()
 
 def generate_otc():
     return ''.join(random.choices('0123456789', k=6))
