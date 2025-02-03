@@ -88,7 +88,7 @@ class Server:
         self.registered_clients[client_id] = new_client
         return True
     
-    def handle_connect_request(self, conn: socket.socket, message: bytes, payload: bytes):
+    def handle_connect_request(self, conn: socket.socket, message: str, payload: bytes):
         signed_text_message = message
         client_id = message.split('-', 1)[0]
         if client_id not in self.registered_clients:
@@ -102,7 +102,7 @@ class Server:
             conn.close()
             return 
 
-        if not utils.verify_signature(client.public_key, bytes(signed_text_message, "utf-8"), payload):
+        if not utils.verify_signature(client.public_key, signed_text_message.encode(), payload):
             print(f"Client id {client_id} couldn't be verified - connection denied")
             conn.close()
             return 
@@ -151,7 +151,7 @@ class Server:
         peer = self.registered_clients[peer_id]
         print(f"Message from {client.client_id} to {peer_id}: {request.payload}")
 
-        message = b'message ' + bytes(client.client_id, 'utf-8') + b' ' + msg_id + b'\n\n' + request.payload
+        message = f"message {client.client_id} {msg_id.decode()}\n\n".encode() + request.payload
         if not peer.recv_message(message):
             print(f"Inbox of peer {self.client_id} is full")
 
@@ -163,7 +163,7 @@ class Server:
         otc = utils.generate_otc()
         client.otc = otc
         client.otc_timestamp = time()
-        conn.send(bytes(otc,"utf-8"))
+        conn.send(otc.encode())
 
     def read_private_key():
         return utils.load_private_key(read_binary(resources, "server_private.pem"))
