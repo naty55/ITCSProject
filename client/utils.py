@@ -53,6 +53,9 @@ def serialize_public_key(public_key: RSAPublicKey) -> bytes:
 def load_public_key(public_key: bytes) -> RSAPublicKey:
     return serialization.load_pem_public_key(public_key)
 
+def load_private_key(private_key: bytes) -> RSAPrivateKey:
+    return serialization.load_pem_private_key(private_key, password=None)
+
 
 def generate_hmac(shared_key: bytes, message: str) -> bytes:
     h = hmac.HMAC(shared_key, hashes.SHA256(), backend=default_backend())
@@ -60,7 +63,6 @@ def generate_hmac(shared_key: bytes, message: str) -> bytes:
     return h.finalize()
 
 def verify_hmac(shared_key: bytes, message: str, signature: bytes) -> bool:
-    print(f"Meesgae : {message}, Signature: {signature}")
     h = generate_hmac(shared_key, message)
     return h == signature
     

@@ -120,8 +120,7 @@ class Client:
     def load_private_key(self):
         if importlib.resources.is_resource(resources,  f"{self.id}-private.pem"):
             logger.info("Found a private key, Loading..")
-            return serialization.load_pem_private_key(
-                importlib.resources.read_binary(resources, f"{self.id}-private.pem"), password=None)
+            return utils.load_private_key(importlib.resources.read_binary(resources, f"{self.id}-private.pem"))
         logger.info("Generating new RSA key pair")
         private = rsa.generate_private_key(public_exponent=65537,key_size=2048)
         private_pem = private.private_bytes(encoding=serialization.Encoding.PEM,
