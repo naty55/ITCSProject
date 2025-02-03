@@ -37,4 +37,3 @@ class Message:
     def syn_message_bytes(peer_id, shared_key_generator):
         shared_key_encrypted = shared_key_generator() 
         return f"message {peer_id} \n\nSYN".encode() + shared_key_encrypted
-    

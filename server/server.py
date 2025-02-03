@@ -151,7 +151,15 @@ class Server:
         peer = self.registered_clients[peer_id]
         print(f"Message from {client.client_id} to {peer_id}: {request.payload}")
 
-        message = f"message {client.client_id} {msg_id.decode()}\n\n".encode() + request.payload
+        payload = request.payload
+        public_key = client.get_public_key_bytes()
+        if payload.startswith(b'SYN'):
+            payload = b'SYN' + public_key + payload[3:]
+            signature = utils.sign(self.pri_key, payload)
+            payload += signature
+            print(len(signature))
+
+        message = f"message {client.client_id} {msg_id.decode()}\n\n".encode() + payload
         if not peer.recv_message(message):
             print(f"Inbox of peer {self.client_id} is full")
 

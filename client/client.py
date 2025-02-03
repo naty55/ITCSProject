@@ -147,7 +147,7 @@ class Client:
             logger.debug(f"Peer public key {peer_pk.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)}")
             logger.info(f"Got public key of {peer_id} from server")
         
-        exe_message_req = Message.syn_message_bytes(peer_id, new_peer.generate_shared_key)
+        exe_message_req = Message.syn_message_bytes(peer_id, lambda : new_peer.generate_shared_key(lambda x: utils.sign(self.private_key, x)))
         logger.info(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}, share secret is encrypted with peer public key")
         self.socket.send(exe_message_req)
         new_peer.status = PeerStatus.ASK
@@ -188,12 +188,12 @@ class Client:
         for message in self.peers[peer_id].messages:
             print(message)
     
-    def handle_new_incoming_messages(self, messages):
+    def handle_new_incoming_messages(self, messages: bytes):
         messages = messages.split(b'message ')
         for message in messages:
             if len(message) < 2:
                 continue
-            header, payload = message.split(b'\n\n')
+            header, payload = message.split(b'\n\n', 1)
             peer_id, msg_id = header.split(b' ')
             peer_id = peer_id.decode()
             msg_type, msg = payload[:3], payload[3:]
@@ -202,7 +202,24 @@ class Client:
             logger.debug(str(self.peers))
             
             if msg_type == b'SYN':
-                shared_secret = utils.decrypt(self.private_key, msg)
+                sender_public_key = msg[:451]
+                message_content = msg[451:-256]
+                signature = msg[-256:]
+                if not utils.verify_signature(self.server_public_key, payload[:-256], signature):
+                    logger.error(f"Couldn't verify signature of SYN message from {peer_id}")
+                    continue
+
+                logger.debug(f"Got public key of {peer_id} from server in SYN message - public key {sender_public_key}")
+                message_content, signature = message_content[:-256], message_content[-256:]
+                shared_secret = utils.decrypt(self.private_key, message_content)
+                sender_pk = utils.load_public_key(sender_public_key)
+                
+                logger.debug("Verifying signature of shared secret using sender public key")
+                if not utils.verify_signature(sender_pk, shared_secret, signature):
+                    logger.error(f"Couldn't verify signature of shared secret from {peer_id}")
+                    continue
+                
+                peer.set_public_key(sender_pk)
                 peer.set_shared_key(shared_secret)
                 logger.debug(f"Shared secret {shared_secret}")
             

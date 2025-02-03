@@ -38,11 +38,11 @@ class Peer:
             self.shared_key = shared_key
 
     
-    def generate_shared_key(self) -> bytes:
+    def generate_shared_key(self, signer) -> bytes:
         if not self.is_known():
             raise Exception("Can't generate shared key without public key")
         self.set_shared_key(os.urandom(32))
-        return utils.encrypt(self.public_key, self.shared_key)
+        return utils.encrypt(self.public_key, self.shared_key) + signer(self.shared_key)
     
     def get_next_message_no(self):
         self.next_message_no += 1
