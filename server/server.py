@@ -166,6 +166,7 @@ class Server:
 
     def SendBySecureChannel(self, client_id: str, conn: socket.socket, client: Client):
         """
+        Dummy function
         Simulate real sending OTC over secure channel to client 
         """
         otc = utils.generate_otc()
@@ -176,5 +177,7 @@ class Server:
     def read_private_key():
         return utils.load_private_key(read_binary(resources, "server_private.pem"))
 
-server = Server()
-server.start()
+
+if __name__ == "__main__":
+    server = Server()
+    server.start()
