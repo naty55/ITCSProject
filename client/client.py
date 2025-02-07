@@ -7,6 +7,7 @@ import utils
 import sys
 from peer import PeerStatus, Peer
 from message import Message
+import my_requests as requests
 from logger import logger
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -81,24 +82,18 @@ class Client:
     
     def register(self):
         public_key_bytes = self.get_public_key_bytes()
-        reg_request = b'register ' + bytes(self.id, 'utf-8') + b'\n\n' + public_key_bytes
+        reg_request = requests.register(self.id, public_key_bytes)
         self.socket.send(reg_request)
 
         otc = self.socket.recv(6)
         logger.debug(f"Got OTC over \"secured\" channel {otc}")
-        enc_otc = utils.encrypt(self.server_public_key, otc)
-        verify_otc_req = b'verify_otc\n\n'
-        signature = utils.sign(self.private_key, otc)
-        verify_otc_req += enc_otc + signature
+        verify_otc_req = requests.verify_otc(otc, lambda x: utils.encrypt(self.server_public_key, x), self.sign)
         self.socket.send(verify_otc_req)
         self.is_registered = True
         self.update_state()
     
     def connect(self):
-        id_bytes = bytes(self.id + '-hello-' + str(time.time()), "utf-8")
-        connect_req = b'connect ' + id_bytes + b'\n\n'
-        signature = utils.sign(self.private_key, id_bytes)
-        connect_req += signature
+        connect_req = requests.connect(self.id, self.sign)
         self.socket.send(connect_req)
     
 
@@ -157,9 +152,7 @@ class Client:
         """
         Will make a blocking call to server asking for peer public key
         """
-        get_pk_req = b'get_public_key ' + bytes(peer_id, 'utf-8')
-        signature = utils.sign(self.private_key, get_pk_req)
-        get_pk_req += b'\n\n' + signature
+        get_pk_req = requests.public_key(peer_id, self.sign)
         response_pk = None
         with self.conn_lock:
             self.socket.send(get_pk_req)
@@ -171,7 +164,7 @@ class Client:
         raise Exception("Couldn't verify response peer pk response")
     
     def get_all_messages_from_server(self):
-        self.socket.send(b'get_messages\n\n')
+        self.socket.send(requests.get_messages())
         messages = b''
         while not messages.endswith(b'----DONE----'):
             data = self.socket.recv(4096)
@@ -279,6 +272,9 @@ class Client:
             print("No peers yet :(")
         else:
             print(peers_str)
+    
+    def sign(self, msg: bytes):
+        return utils.sign(self.private_key, msg)
 
 
 
