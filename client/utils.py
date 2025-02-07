@@ -57,6 +57,11 @@ def load_public_key(public_key: bytes) -> RSAPublicKey:
 def load_private_key(private_key: bytes) -> RSAPrivateKey:
     return serialization.load_pem_private_key(private_key, password=None)
 
+def serialize_private_key(private_key: RSAPrivateKey):
+    return private_key.private_bytes(encoding=serialization.Encoding.PEM,
+                                format=serialization.PrivateFormat.PKCS8,
+                                encryption_algorithm=serialization.NoEncryption())
+
 
 def generate_hmac(shared_key: bytes, message: str) -> bytes:
     h = hmac.HMAC(shared_key, hashes.SHA256(), backend=default_backend())

@@ -9,7 +9,6 @@ from peer import PeerStatus, Peer
 from message import Message
 import my_requests as requests
 from logger import logger
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import importlib.resources 
 import resources
@@ -102,8 +101,8 @@ class Client:
         if peer.status == PeerStatus.UNKOWN:
             logger.debug("Unkonwn peer - exchanging symmeteric key")
             self.exchange_symmetric_key(peer_id)
-        message = Message(self.id, peer_id, message, str(peer.get_next_message_no()), str(time.time()))
-        message_req = message.to_bytes(peer.aes_encrypt, peer.generate_hmac)
+        message_obj = Message(self.id, peer_id, message, str(peer.get_next_message_no()), str(time.time()))
+        message_req = message_obj.to_bytes(peer.aes_encrypt, peer.generate_hmac)
         self.socket.send(message_req)
         peer.message_sent(message)
 
@@ -118,10 +117,7 @@ class Client:
             return utils.load_private_key(importlib.resources.read_binary(resources, f"{self.id}-private.pem"))
         logger.info("Generating new RSA key pair")
         private = rsa.generate_private_key(public_exponent=65537,key_size=2048)
-        private_pem = private.private_bytes(encoding=serialization.Encoding.PEM,
-                                            format=serialization.PrivateFormat.PKCS8,
-                                            encryption_algorithm=serialization.NoEncryption()
-                                            )
+        private_pem = utils.serialize_private_key(private)
         with open(os.path.dirname(__file__) + f"/resources/{self.id}-private.pem", "wb") as pri_file:
             pri_file.write(private_pem)
         return private
@@ -139,10 +135,10 @@ class Client:
         if not new_peer.is_known():
             peer_pk = self.get_public_key_of_peer_from_server(peer_id)
             new_peer.set_public_key(peer_pk)
-            logger.debug(f"Peer public key {peer_pk.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)}")
+            logger.debug(f"Peer public key {utils.serialize_public_key(peer_pk)}")
             logger.info(f"Got public key of {peer_id} from server")
         
-        exe_message_req = Message.syn_message_bytes(peer_id, lambda : new_peer.generate_shared_key(lambda x: utils.sign(self.private_key, x)))
+        exe_message_req = Message.syn_message_bytes(peer_id, lambda : new_peer.generate_shared_key(self.sign))
         logger.info(f"Generated new shared secret to send to {peer_id}, shared_secret={new_peer.shared_key}, share secret is encrypted with peer public key")
         self.socket.send(exe_message_req)
         new_peer.status = PeerStatus.ASK
@@ -193,7 +189,7 @@ class Client:
             logger.debug(f"Got message from {peer_id}, msg_type={msg_type}, payload={msg}")
             peer = self.get_peer(peer_id)
             logger.debug(str(self.peers))
-            
+
             if msg_type == b'SYN':
                 sender_public_key = msg[:451]
                 message_content = msg[451:-256]
@@ -214,7 +210,6 @@ class Client:
                 
                 peer.set_public_key(sender_pk)
                 peer.set_shared_key(shared_secret)
-                logger.debug(f"Shared secret {shared_secret}")
             
             if msg_type == b'MSG':
                 if not peer.shared_key:
@@ -242,8 +237,8 @@ class Client:
     
     def recv_messages(self):
         def recv_message():
-            try: 
-                while True:
+            while True:
+                try:
                     sockets = [self.socket]
                     read_socket, _, _ = select(sockets, [], [])
                     if read_socket: 
@@ -257,8 +252,11 @@ class Client:
                         
                         logger.info(f"Got new message {message}")
                         self.handle_new_incoming_messages(message)
-            except OSError:
-                logger.exception("Error in recv_message loop, connection is closed")
+                except OSError:
+                    logger.exception("Error in recv_message loop, connection is closed")
+                    break
+                except Exception as e:
+                    logger.exception(e)
         Thread(target=recv_message).start()
     
     def get_peer(self, peer_id):
@@ -274,6 +272,7 @@ class Client:
             print(peers_str)
     
     def sign(self, msg: bytes):
+        logger.debug(f"Signing message {msg} with self private key")
         return utils.sign(self.private_key, msg)
 
 
