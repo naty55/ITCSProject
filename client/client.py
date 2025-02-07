@@ -5,6 +5,7 @@ import json
 import pickle
 import utils
 import sys
+import config
 from peer import PeerStatus, Peer
 from message import Message
 import my_requests as requests
@@ -35,7 +36,7 @@ class Client:
         logger.debug(f"self public key: {self.get_public_key_bytes()}")
     
     def init_connection(self):
-        self.conn = self.socket.connect(("localhost", 6789))
+        self.conn = self.socket.connect((config.SERVER_HOST, config.SERVER_PORT))
         if self.is_registered:
             logger.debug("Registered, connecting to server...")
             self.connect()
@@ -104,7 +105,7 @@ class Client:
         message_obj = Message(self.id, peer_id, message, str(peer.get_next_message_no()), str(time.time()))
         message_req = message_obj.to_bytes(peer.aes_encrypt, peer.generate_hmac)
         self.socket.send(message_req)
-        peer.message_sent(message)
+        peer.message_sent(message_obj)
 
     def close(self):
         self.socket.close()

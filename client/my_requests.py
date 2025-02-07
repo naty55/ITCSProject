@@ -11,8 +11,8 @@ def connect(peer_id: str, signer):
     return b'connect ' + id_bytes + b'\n\n' + signer(id_bytes)
 
 def public_key(peer_id: str, signer):
-    req = f'get_public_key {peer_id} {time.time()}\n\n'.encode()
-    return req + signer(req)
+    req = f'get_public_key {peer_id} {time.time()}'.encode()
+    return req + b'\n\n' + signer(req)
 
 def get_messages():
     return b'get_messages\n\n'
