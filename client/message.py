@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-
+from logger import logger
 @dataclass
 class Message:
     from_peer_id: str
@@ -16,6 +16,7 @@ class Message:
         self.msg_status = "R"
     
     def to_bytes(self, encryptor, signer = None):
+        logger.info("Generating HMAC signature for message")
         hmac = signer(self.content)
         return f"message {self.to_peer_id} {self.msg_id}\n\nMSG".encode() + encryptor(self.content) + hmac
     

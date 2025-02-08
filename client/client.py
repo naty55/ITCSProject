@@ -195,6 +195,7 @@ class Client:
                 sender_public_key = msg[:451]
                 message_content = msg[451:-256]
                 signature = msg[-256:]
+                logger.info(f"Verifying signature of SYN message from {peer_id} using server public key")
                 if not utils.verify_signature(self.server_public_key, payload[:-256], signature):
                     logger.error(f"Couldn't verify signature of SYN message from {peer_id}")
                     continue

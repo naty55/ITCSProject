@@ -2,9 +2,9 @@ from enum import Enum
 import utils
 import os
 from message import Message
+from logger import logger
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import padding as sym_padding, hmac, hashes
+from cryptography.hazmat.primitives import padding as sym_padding
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 
@@ -63,6 +63,7 @@ class Peer:
     def aes_encrypt(self, plaintext: str) -> bytes:
         if not self.shared_key:
             raise Exception("No shared key")
+        logger.info(f"Encrypting message {plaintext} using AES - Key: {self.shared_key}")
         iv = os.urandom(16)
         padder = sym_padding.PKCS7(128).padder()
         padded_data = padder.update(bytes(plaintext, 'utf-8')) + padder.finalize()
@@ -81,19 +82,22 @@ class Peer:
         cipher = Cipher(algorithms.AES(self.shared_key), modes.CBC(iv))
         decryptor = cipher.decryptor()
         padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-
         unpadder = sym_padding.PKCS7(128).unpadder()
         plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+
+        logger.info(f"Decrypted message {plaintext} using AES - Key: {self.shared_key}")
         return plaintext
     
     def generate_hmac(self, message: str):
         if not self.shared_key:
             raise Exception("No shared Key - can't generate HMAC signature")
+        logger.info(f"Generating HMAC signature for message {message}")
         return utils.generate_hmac(self.shared_key, message)
     
     def verify_hmac(self, message: str, signature: bytes):
         if not self.shared_key:
             raise Exception("No shared Key - can't verify signature")
+        logger.info(f"Verifying HMAC signature for message {message} and signature {signature} using shared key")
         return utils.verify_hmac(self.shared_key, message, signature)
     
     def __str__(self):

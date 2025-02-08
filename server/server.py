@@ -42,6 +42,7 @@ class Server:
             self.messages_loop(client, conn)
         
     def messages_loop(self, client: Client, conn: socket.socket):
+        print(f"Starting messages loop for {client.client_id}") 
         # Connection stays open for next requests
         while True:
             try:
@@ -71,6 +72,7 @@ class Server:
             return False
         
         new_client = Client(client_id, utils.load_public_key(payload), conn, Lock(), True, [])
+        print(f"Sending OTC to client {client_id}")
         self.SendBySecureChannel(client_id, conn, new_client)
         data = conn.recv(4096)
         otc_request = Request.from_bytes(data)
